@@ -74,14 +74,12 @@ export default function SettingsModal({
         setAuthMsg({ type: 'error', text: json.error?.message || 'Erro ao atualizar senha.' });
         return;
       }
-      if (json.token) {
-        localStorage.setItem('dra_marina_auth_token', json.token);
-      }
+      localStorage.removeItem('dra_marina_auth_token');
       setCurrentPassword('');
       setNewPassword('');
       setAuthMsg({ type: 'ok', text: 'Usuário e senha atualizados com sucesso!' });
       if (onCredentialsUpdated) {
-        onCredentialsUpdated(json.username, json.token);
+        onCredentialsUpdated(json.username);
       }
     } catch {
       setAuthMsg({ type: 'error', text: 'Erro de conexão ao salvar credenciais.' });
@@ -221,7 +219,7 @@ export default function SettingsModal({
                       id="auth-new-pass"
                       type="password"
                       className="form-input"
-                      placeholder="Nova senha (mín. 4 dígitos)"
+                      placeholder="Nova senha (mín. 8 caracteres)"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                     />

@@ -1,0 +1,11 @@
+node_modules
+.git
+.gitignore
+data/*.sqlite*
+data/*.xlsx
+data/*.xls
+data/*.csv
+data/remote-url.txt
+.env
+.env.*
+*.log

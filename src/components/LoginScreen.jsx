@@ -24,10 +24,8 @@ export default function LoginScreen({ onLoginSuccess }) {
         setErrorMsg(json.error?.message || 'Usuário ou senha incorretos.');
         return;
       }
-      if (json.token) {
-        localStorage.setItem('dra_marina_auth_token', json.token);
-      }
-      onLoginSuccess({ username: json.username, token: json.token });
+      localStorage.removeItem('dra_marina_auth_token');
+      onLoginSuccess({ username: json.username });
     } catch {
       setErrorMsg('Não foi possível conectar ao servidor. Verifique se o notebook está ligado.');
     } finally {

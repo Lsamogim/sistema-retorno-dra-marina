@@ -20,8 +20,7 @@ import PatientDrawer from './components/PatientDrawer.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
 
 function getAuthHeaders() {
-  const token = localStorage.getItem('dra_marina_auth_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return {};
 }
 
 const CATEGORY_ICONS = {
@@ -54,7 +53,6 @@ function formatMonthsLabel(days) {
 export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authUser, setAuthUser] = useState(null);
-  const [authToken, setAuthToken] = useState(() => localStorage.getItem('dra_marina_auth_token') || '');
 
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -109,6 +107,11 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
+    try {
+      localStorage.removeItem('dra_marina_auth_token');
+    } catch {
+      // ignore storage errors
+    }
     fetch('/api/auth/session', {
       headers: getAuthHeaders(),
       credentials: 'include',
@@ -138,9 +141,8 @@ export default function App() {
   }, [fetchDashboard]);
 
   const handleLoginSuccess = useCallback(
-    ({ username, token }) => {
+    ({ username }) => {
       setAuthUser(username);
-      if (token) setAuthToken(token);
       setLoading(true);
       fetchDashboard();
     },
@@ -153,8 +155,11 @@ export default function App() {
       headers: getAuthHeaders(),
       credentials: 'include',
     }).catch(() => {});
-    localStorage.removeItem('dra_marina_auth_token');
-    setAuthToken('');
+    try {
+      localStorage.removeItem('dra_marina_auth_token');
+    } catch {
+      // ignore
+    }
     setAuthUser(null);
     setDashboard(null);
   }, []);
@@ -438,7 +443,7 @@ export default function App() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <a
-                href={`/api/backup${authToken ? `?token=${encodeURIComponent(authToken)}` : ''}`}
+                href="/api/backup"
                 className="mobile-backup-btn"
                 title="Baixar cópia de segurança do banco local"
                 aria-label="Baixar backup"
@@ -529,7 +534,7 @@ export default function App() {
           </div>
           <div className="rail-footer-actions">
             <a
-              href={`/api/backup${authToken ? `?token=${encodeURIComponent(authToken)}` : ''}`}
+              href="/api/backup"
               className="btn-rail-secondary"
               title="Baixar cópia de segurança do banco local"
             >
@@ -849,9 +854,8 @@ export default function App() {
           categories={dashboard.categories}
           currentUsername={authUser}
           authHeaders={getAuthHeaders}
-          onCredentialsUpdated={(newUser, newToken) => {
+          onCredentialsUpdated={(newUser) => {
             setAuthUser(newUser);
-            if (newToken) setAuthToken(newToken);
             showToastMessage('Usuário e senha atualizados com sucesso.');
           }}
           onClose={() => setShowSettings(false)}

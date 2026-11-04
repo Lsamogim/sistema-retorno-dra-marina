@@ -55,7 +55,7 @@ export function createSessionToken(username, secret) {
   const payload = Buffer.from(
     JSON.stringify({
       u: username,
-      exp: Date.now() + 1000 * 60 * 60 * 24 * 90, // 90 dias
+      exp: Date.now() + 1000 * 60 * 60 * 24 * 14, // 14 dias
     })
   ).toString('base64url');
   const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');

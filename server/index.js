@@ -1,8 +1,10 @@
 import express from 'express';
 import multer from 'multer';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import db, {
   DB_PATH,
@@ -19,6 +21,18 @@ import { computeDashboardData, getLocalTodayIso } from './returnEngine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.resolve(__dirname, '..', 'dist');
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ALLOWED_UPLOAD_EXTS = new Set(['.xlsx', '.xls', '.csv']);
+
+function clampStr(val, maxLen) {
+  if (typeof val !== 'string') return null;
+  const trimmed = val.trim();
+  return trimmed ? trimmed.slice(0, maxLen) : null;
+}
+
+function validIsoOrNull(val) {
+  return typeof val === 'string' && ISO_DATE_RE.test(val) ? val : null;
+}
 
 initDatabase();
 
@@ -36,14 +50,96 @@ if ((!existingImports || existingImports.cnt === 0) && fs.existsSync(INITIAL_REP
 }
 
 const app = express();
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+
+// Cabeçalhos de segurança HTTP (CSP, HSTS, Anti-Clickjacking, NoSniff)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  );
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
 });
 
-app.use(express.json({ limit: '2mb' }));
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (!ALLOWED_UPLOAD_EXTS.has(ext)) {
+      const err = new Error('Formato de arquivo não permitido. Envie apenas .xlsx, .xls ou .csv.');
+      err.status = 400;
+      err.expose = true;
+      return cb(err);
+    }
+    cb(null, true);
+  },
+});
+
+app.use(express.json({ limit: '512kb' }));
 
 const SESSION_COOKIE_NAME = 'dra_marina_session';
+const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 14; // 14 dias
+
+// Proteção contra força bruta nas rotas de autenticação (máx. 5 falhas / 15 min por IP)
+const authAttempts = new Map();
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = 5;
+
+function authRateLimit(req, res, next) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = authAttempts.get(ip);
+
+  if (entry && now < entry.resetAt) {
+    if (entry.count >= AUTH_MAX_ATTEMPTS) {
+      const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      return res.status(429).json({
+        error: {
+          code: 'TOO_MANY_ATTEMPTS',
+          message: `Muitas tentativas de acesso. Aguarde ${retryAfterSec} segundos antes de tentar novamente.`,
+        },
+      });
+    }
+  } else if (entry && now >= entry.resetAt) {
+    authAttempts.delete(ip);
+  }
+  next();
+}
+
+function recordFailedAuth(req) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = authAttempts.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    authAttempts.set(ip, { count: 1, resetAt: now + AUTH_WINDOW_MS });
+  } else {
+    entry.count += 1;
+  }
+}
+
+function clearFailedAuth(req) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  authAttempts.delete(ip);
+}
+
+function buildSessionCookie(req, token, maxAgeSec) {
+  const isSecure =
+    req.secure ||
+    req.headers['x-forwarded-proto'] === 'https' ||
+    Boolean(process.env.RAILWAY_PUBLIC_DOMAIN) ||
+    process.env.NODE_ENV === 'production';
+  const secureFlag = isSecure ? '; Secure' : '';
+  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax${secureFlag}`;
+}
 
 function parseCookies(cookieHeader) {
   const out = {};
@@ -53,7 +149,11 @@ function parseCookies(cookieHeader) {
     if (idx === -1) continue;
     const k = part.slice(0, idx).trim();
     const v = part.slice(idx + 1).trim();
-    out[k] = decodeURIComponent(v);
+    try {
+      out[k] = decodeURIComponent(v);
+    } catch {
+      out[k] = v;
+    }
   }
   return out;
 }
@@ -71,11 +171,10 @@ function getAuthenticatedUser(req) {
     const cookies = parseCookies(req.headers.cookie);
     token = cookies[SESSION_COOKIE_NAME] || null;
   }
-  if (!token && typeof req.query.token === 'string') {
-    token = req.query.token;
-  }
   const username = verifySessionToken(token, authRow.token_secret);
-  if (!username) return null;
+  if (!username || username.trim().toLowerCase() !== authRow.username.trim().toLowerCase()) {
+    return null;
+  }
   return authRow.username;
 }
 
@@ -105,7 +204,7 @@ app.get('/api/auth/session', (req, res) => {
   res.json({ authenticated: true, username });
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', authRateLimit, (req, res) => {
   const rawUser = String(req.body.username || '').trim().toLowerCase();
   const rawPass = String(req.body.password || '');
 
@@ -117,10 +216,11 @@ app.post('/api/auth/login', (req, res) => {
   }
 
   const expectedUser = authRow.username.trim().toLowerCase();
-  const isUserMatch = rawUser === expectedUser;
   const isPassMatch = verifyPassword(rawPass, authRow.password_hash);
+  const isUserMatch = rawUser === expectedUser;
 
   if (!isUserMatch || !isPassMatch) {
+    recordFailedAuth(req);
     return res.status(401).json({
       error: {
         code: 'INVALID_CREDENTIALS',
@@ -129,30 +229,51 @@ app.post('/api/auth/login', (req, res) => {
     });
   }
 
+  clearFailedAuth(req);
   const token = createSessionToken(authRow.username, authRow.token_secret);
-  const maxAgeSec = 60 * 60 * 24 * 90; // 90 dias
-  res.setHeader(
-    'Set-Cookie',
-    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax`
-  );
+  res.setHeader('Set-Cookie', buildSessionCookie(req, token, SESSION_MAX_AGE_SEC));
 
   res.json({
     ok: true,
     username: authRow.username,
-    token,
   });
 });
 
-app.post('/api/auth/logout', (_req, res) => {
-  res.setHeader(
-    'Set-Cookie',
-    `${SESSION_COOKIE_NAME}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`
-  );
+app.post('/api/auth/logout', (req, res) => {
+  const user = getAuthenticatedUser(req);
+  if (user) {
+    // Rotacionar o segredo da sessão ao sair para invalidar tokens emitidos anteriormente
+    const newSecret = crypto.randomBytes(32).toString('hex');
+    db.prepare('UPDATE app_auth SET token_secret = ?, updated_at = ? WHERE id = 1').run(
+      newSecret,
+      new Date().toISOString()
+    );
+  }
+  res.setHeader('Set-Cookie', buildSessionCookie(req, '', 0));
   res.json({ ok: true });
 });
 
-// Middleware de proteção para todas as demais rotas /api/*
+// Proteção CSRF por validação de Origin e middleware de autenticação para /api/*
 app.use('/api', (req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    const origin = req.headers.origin;
+    const host = req.headers.host;
+    if (origin && host) {
+      try {
+        const originHost = new URL(origin).host;
+        if (originHost !== host) {
+          return res.status(403).json({
+            error: { code: 'CSRF_ORIGIN_MISMATCH', message: 'Origem da requisição não autorizada.' },
+          });
+        }
+      } catch {
+        return res.status(403).json({
+          error: { code: 'CSRF_INVALID_ORIGIN', message: 'Cabeçalho Origin inválido.' },
+        });
+      }
+    }
+  }
+
   if (
     req.path === '/health' ||
     req.path === '/auth/session' ||
@@ -174,14 +295,15 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-app.put('/api/auth/credentials', (req, res, next) => {
+app.put('/api/auth/credentials', authRateLimit, (req, res, next) => {
   try {
     const currentPassword = String(req.body.currentPassword || '');
-    const newUsername = String(req.body.newUsername || '').trim();
+    const newUsername = clampStr(req.body.newUsername, 60);
     const newPassword = String(req.body.newPassword || '');
 
     const authRow = db.prepare('SELECT * FROM app_auth WHERE id = 1').get();
     if (!verifyPassword(currentPassword, authRow.password_hash)) {
+      recordFailedAuth(req);
       return res.status(400).json({
         error: {
           code: 'WRONG_CURRENT_PASSWORD',
@@ -190,25 +312,33 @@ app.put('/api/auth/credentials', (req, res, next) => {
       });
     }
 
+    if (newPassword.length > 0 && newPassword.length < 8) {
+      return res.status(400).json({
+        error: {
+          code: 'WEAK_PASSWORD',
+          message: 'A nova senha deve ter pelo menos 8 caracteres.',
+        },
+      });
+    }
+
+    clearFailedAuth(req);
     const updatedUser = newUsername || authRow.username;
-    const updatedHash = newPassword.length >= 4 ? hashPassword(newPassword) : authRow.password_hash;
+    const updatedHash = newPassword.length >= 8 ? hashPassword(newPassword) : authRow.password_hash;
+    const newSecret = crypto.randomBytes(32).toString('hex');
 
     db.prepare(`
       UPDATE app_auth
       SET username = ?,
           password_hash = ?,
+          token_secret = ?,
           updated_at = ?
       WHERE id = 1
-    `).run(updatedUser, updatedHash, new Date().toISOString());
+    `).run(updatedUser, updatedHash, newSecret, new Date().toISOString());
 
-    const token = createSessionToken(updatedUser, authRow.token_secret);
-    const maxAgeSec = 60 * 60 * 24 * 90;
-    res.setHeader(
-      'Set-Cookie',
-      `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax`
-    );
+    const token = createSessionToken(updatedUser, newSecret);
+    res.setHeader('Set-Cookie', buildSessionCookie(req, token, SESSION_MAX_AGE_SEC));
 
-    res.json({ ok: true, username: updatedUser, token });
+    res.json({ ok: true, username: updatedUser });
   } catch (err) {
     next(err);
   }
@@ -281,23 +411,16 @@ app.patch('/api/patients/:id', (req, res, next) => {
       return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Paciente não encontrado.' } });
     }
 
-    const displayName =
-      typeof req.body.displayName === 'string' && req.body.displayName.trim()
-        ? req.body.displayName.trim()
-        : existing.display_name;
+    const displayName = clampStr(req.body.displayName, 160) || existing.display_name;
 
     const phoneManual =
       req.body.phoneManual !== undefined
-        ? req.body.phoneManual && String(req.body.phoneManual).trim()
-          ? String(req.body.phoneManual).trim()
-          : null
+        ? clampStr(String(req.body.phoneManual || ''), 40)
         : existing.phone_manual;
 
     const notesManual =
       req.body.notesManual !== undefined
-        ? req.body.notesManual && String(req.body.notesManual).trim()
-          ? String(req.body.notesManual).trim()
-          : null
+        ? clampStr(String(req.body.notesManual || ''), 1000)
         : existing.notes_manual;
 
     db.prepare(`
@@ -317,7 +440,13 @@ app.post('/api/patients/:id/merge', (req, res, next) => {
     const sourceId = Number(req.params.id);
     const targetId = Number(req.body.targetPatientId);
 
-    if (!Number.isInteger(sourceId) || !Number.isInteger(targetId) || sourceId === targetId) {
+    if (
+      !Number.isInteger(sourceId) ||
+      !Number.isInteger(targetId) ||
+      sourceId <= 0 ||
+      targetId <= 0 ||
+      sourceId === targetId
+    ) {
       return res.status(400).json({
         error: { code: 'INVALID_MERGE', message: 'Selecione um paciente diferente para unificar.' },
       });
@@ -328,6 +457,15 @@ app.post('/api/patients/:id/merge', (req, res, next) => {
     if (!source || !target) {
       return res.status(404).json({
         error: { code: 'NOT_FOUND', message: 'Paciente de origem ou destino não encontrado.' },
+      });
+    }
+
+    if (target.merged_into_id) {
+      return res.status(400).json({
+        error: {
+          code: 'TARGET_ALREADY_MERGED',
+          message: 'O paciente de destino já foi unificado em outro cadastro.',
+        },
       });
     }
 
@@ -403,6 +541,18 @@ app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
     const patientId = Number(req.params.id);
     const { categoryId } = req.params;
 
+    if (!Number.isInteger(patientId) || patientId <= 0) {
+      return res.status(400).json({ error: { code: 'INVALID_ID', message: 'Paciente inválido.' } });
+    }
+
+    const patExists = db.prepare('SELECT 1 FROM patients WHERE id = ?').get(patientId);
+    const catExists = db.prepare('SELECT 1 FROM categories WHERE id = ?').get(categoryId);
+    if (!patExists || !catExists) {
+      return res.status(404).json({
+        error: { code: 'NOT_FOUND', message: 'Paciente ou categoria não encontrados.' },
+      });
+    }
+
     const existing =
       db
         .prepare('SELECT * FROM patient_category_states WHERE patient_id = ? AND category_id = ?')
@@ -415,7 +565,7 @@ app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
     if (typeof req.body.contacted === 'boolean') {
       if (req.body.contacted) {
         contactedAt = nowIso;
-        contactedForCycleDate = req.body.cycleDate || getLocalTodayIso();
+        contactedForCycleDate = clampStr(req.body.cycleDate, 60) || getLocalTodayIso();
       } else {
         contactedAt = null;
         contactedForCycleDate = null;
@@ -427,7 +577,9 @@ app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
     let archivedAt = existing.archived_at ?? null;
     if (typeof req.body.archived === 'boolean') {
       archived = req.body.archived ? 1 : 0;
-      archivedReason = req.body.archived ? req.body.archivedReason || 'Tratamento concluído' : null;
+      archivedReason = req.body.archived
+        ? clampStr(req.body.archivedReason, 120) || 'Tratamento concluído'
+        : null;
       archivedAt = req.body.archived ? nowIso : null;
     }
 
@@ -436,22 +588,22 @@ app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
 
     if (req.body.reviewDone && typeof req.body.reviewDone === 'object') {
       const { done, anchorDate } = req.body.reviewDone;
-      reviewDismissedForDate = anchorDate || getLocalTodayIso();
+      reviewDismissedForDate = validIsoOrNull(anchorDate) || getLocalTodayIso();
       reviewStatusOverride = done ? 'done' : 'pending';
     } else if (req.body.dismissReviewForDate !== undefined) {
-      reviewDismissedForDate = req.body.dismissReviewForDate || null;
-      reviewStatusOverride = req.body.dismissReviewForDate ? 'done' : null;
+      reviewDismissedForDate = validIsoOrNull(req.body.dismissReviewForDate);
+      reviewStatusOverride = reviewDismissedForDate ? 'done' : null;
     }
 
     let renewalDoneForDate = existing.renewal_done_for_date ?? null;
     if (req.body.renewalDone && typeof req.body.renewalDone === 'object') {
       const { done, anchorDate } = req.body.renewalDone;
-      renewalDoneForDate = done ? anchorDate || getLocalTodayIso() : null;
+      renewalDoneForDate = done ? validIsoOrNull(anchorDate) || getLocalTodayIso() : null;
     }
 
     const customDueDate =
       req.body.customDueDate !== undefined
-        ? req.body.customDueDate || null
+        ? validIsoOrNull(req.body.customDueDate)
         : existing.custom_due_date ?? null;
 
     let customIntervalDays = existing.custom_interval_days ?? null;
@@ -462,7 +614,7 @@ app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
           ? null
           : [15, 21, 30].includes(parsedInterval)
           ? parsedInterval
-          : parsedInterval > 0
+          : Number.isInteger(parsedInterval) && parsedInterval >= 1 && parsedInterval <= 730
           ? parsedInterval
           : null;
     }
@@ -543,16 +695,17 @@ app.put('/api/categories', (req, res, next) => {
     try {
       for (const item of list) {
         const recDays = Math.max(1, Math.min(730, Number(item.recurrenceDays) || 30));
+        const parsedRev = Number(item.reviewDays);
         const revDays =
-          item.reviewDays != null && item.reviewDays !== ''
-            ? Math.max(1, Math.min(180, Number(item.reviewDays)))
+          item.reviewDays != null && item.reviewDays !== '' && Number.isFinite(parsedRev)
+            ? Math.max(1, Math.min(180, parsedRev))
             : null;
         updateStmt.run(
           recDays,
           revDays,
-          String(item.whatsappTemplate || '').trim(),
-          item.reviewWhatsappTemplate ? String(item.reviewWhatsappTemplate).trim() : null,
-          item.id
+          clampStr(item.whatsappTemplate, 1000) || '',
+          clampStr(item.reviewWhatsappTemplate, 1000),
+          String(item.id || '')
         );
       }
       db.exec('COMMIT');
@@ -568,16 +721,36 @@ app.put('/api/categories', (req, res, next) => {
 });
 
 app.get('/api/backup', (_req, res, next) => {
+  const tmpBackupPath = path.join(
+    os.tmpdir(),
+    `clinica-backup-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.sqlite`
+  );
   try {
     db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    db.prepare('VACUUM INTO ?').run(tmpBackupPath);
+    const tmpDb = new DatabaseSync(tmpBackupPath);
+    try {
+      // Remover credenciais e segredo de sessão da cópia de backup exportada
+      tmpDb.exec('DELETE FROM app_auth;');
+    } finally {
+      tmpDb.close();
+    }
     const filename = `backup-retornos-dra-marina-${getLocalTodayIso()}.sqlite`;
-    res.download(DB_PATH, filename);
+    res.download(tmpBackupPath, filename, () => {
+      fs.rmSync(tmpBackupPath, { force: true });
+    });
   } catch (err) {
+    fs.rmSync(tmpBackupPath, { force: true });
     next(err);
   }
 });
 
 app.get('/api/sync-snapshot', (_req, res, next) => {
+  if (process.env.ALLOW_SYNC_SNAPSHOT !== 'true') {
+    return res.status(403).json({
+      error: { code: 'SYNC_DISABLED', message: 'Endpoint de migração desativado.' },
+    });
+  }
   try {
     res.json({
       categories: db.prepare('SELECT * FROM categories').all(),
@@ -591,10 +764,19 @@ app.get('/api/sync-snapshot', (_req, res, next) => {
   }
 });
 
-app.post('/api/sync-snapshot', express.json({ limit: '25mb' }), (req, res, next) => {
+app.post('/api/sync-snapshot', express.json({ limit: '15mb' }), (req, res, next) => {
+  if (process.env.ALLOW_SYNC_SNAPSHOT !== 'true') {
+    return res.status(403).json({
+      error: { code: 'SYNC_DISABLED', message: 'Endpoint de migração desativado.' },
+    });
+  }
   try {
-    const { categories = [], patients = [], appointments = [], states = [], importLogs = [] } =
-      req.body || {};
+    const { categories, patients, appointments, states, importLogs } = req.body || {};
+    if (![categories, patients, appointments, states, importLogs].every(Array.isArray)) {
+      return res.status(400).json({
+        error: { code: 'INVALID_SNAPSHOT', message: 'Formato de snapshot inválido.' },
+      });
+    }
 
     db.exec('PRAGMA foreign_keys = OFF;');
     db.exec('BEGIN');
@@ -733,10 +915,15 @@ if (fs.existsSync(DIST_DIR)) {
 
 app.use((err, _req, res, _next) => {
   console.error('[API Error]', err);
-  res.status(500).json({
+  const statusCode = Number(err.status) || 500;
+  const safeMessage =
+    err.expose && err.message
+      ? err.message
+      : 'Erro interno ao processar a solicitação.';
+  res.status(statusCode).json({
     error: {
-      code: 'INTERNAL_ERROR',
-      message: err.message || 'Erro interno ao processar a solicitação.',
+      code: statusCode === 400 ? 'BAD_REQUEST' : 'INTERNAL_ERROR',
+      message: safeMessage,
     },
   });
 });

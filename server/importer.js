@@ -39,11 +39,19 @@ export function parseReportDate(raw) {
   return null;
 }
 
+const MAX_IMPORT_ROWS = 10000;
+
 /**
  * Lê buffer de arquivo .xlsx / .xls / .csv tratando codificação UTF-8 ou Windows-1252 em CSVs brasileiros.
  */
 function readSpreadsheetRows(buffer, filename = '') {
   const lower = filename.toLowerCase();
+  const safeOpts = {
+    raw: true,
+    cellFormula: false,
+    cellHTML: false,
+    sheetRows: MAX_IMPORT_ROWS + 1,
+  };
   let workbook;
 
   if (lower.endsWith('.csv') || lower.endsWith('.txt')) {
@@ -51,9 +59,9 @@ function readSpreadsheetRows(buffer, filename = '') {
     if (text.includes('\uFFFD')) {
       text = buffer.toString('latin1');
     }
-    workbook = XLSX.read(text, { type: 'string', raw: true });
+    workbook = XLSX.read(text, { ...safeOpts, type: 'string' });
   } else {
-    workbook = XLSX.read(buffer, { type: 'buffer', raw: true });
+    workbook = XLSX.read(buffer, { ...safeOpts, type: 'buffer' });
   }
 
   const firstSheetName = workbook.SheetNames[0];
@@ -181,7 +189,9 @@ export function importReportBuffer(buffer, filename = 'relatorio.xlsx') {
         newPatients += 1;
       } else {
         let targetId = patient.id;
-        while (patient && patient.merged_into_id) {
+        const visitedMergeIds = new Set([patient.id]);
+        while (patient && patient.merged_into_id && !visitedMergeIds.has(patient.merged_into_id)) {
+          visitedMergeIds.add(patient.merged_into_id);
           patient = findPatientById.get(patient.merged_into_id);
           if (patient) targetId = patient.id;
         }
@@ -293,15 +303,20 @@ export function importReportBuffer(buffer, filename = 'relatorio.xlsx') {
       }
     }
 
-    // Se for uma planilha completa de período (>= 50 linhas), remover agendamentos que saíram da agenda
+    // Se for uma planilha completa de período (>= 50 linhas e janela <= 400 dias), remover agendamentos que saíram da agenda
     if (rows.length >= 50 && minImportedDate && maxImportedDate && seenHashes.size > 0) {
-      const existingInWindow = db
-        .prepare('SELECT id, dedupe_hash FROM appointments WHERE appointment_date >= ? AND appointment_date <= ?')
-        .all(minImportedDate, maxImportedDate);
-      const deleteById = db.prepare('DELETE FROM appointments WHERE id = ?');
-      for (const appt of existingInWindow) {
-        if (!seenHashes.has(appt.dedupe_hash)) {
-          deleteById.run(appt.id);
+      const windowSpanDays =
+        (new Date(`${maxImportedDate}T12:00:00Z`) - new Date(`${minImportedDate}T12:00:00Z`)) /
+        86400000;
+      if (windowSpanDays >= 0 && windowSpanDays <= 400) {
+        const existingInWindow = db
+          .prepare('SELECT id, dedupe_hash FROM appointments WHERE appointment_date >= ? AND appointment_date <= ?')
+          .all(minImportedDate, maxImportedDate);
+        const deleteById = db.prepare('DELETE FROM appointments WHERE id = ?');
+        for (const appt of existingInWindow) {
+          if (!seenHashes.has(appt.dedupe_hash)) {
+            deleteById.run(appt.id);
+          }
         }
       }
     }
