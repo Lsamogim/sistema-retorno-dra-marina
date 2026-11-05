@@ -4,11 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import db, { DATA_DIR } from './db.js';
-import { getLocalTodayIso } from './returnEngine.js';
+import { addDaysIso, getLocalTodayIso } from './returnEngine.js';
+import { offsitePublicConfig, offsiteRetentionDays, readOffsiteState, uploadBackupIfNeeded } from './offsite.js';
 
 export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const RETENTION = Math.max(1, Number(process.env.BACKUP_RETENTION_DAYS) || 14);
 const ENC_MAGIC = Buffer.from('DMBK1');
+const BACKUP_FILE_RE = /^backup-\d{4}-\d{2}-\d{2}\.sqlite(\.enc)?$/;
 
 /**
  * Gera uma cópia consistente do banco sem credenciais: sem sessões, sem hashes de senha
@@ -65,7 +67,7 @@ export function deriveBackupKey(secret) {
 export function runDailyBackupIfDue() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const today = getLocalTodayIso();
-  const existing = fs.readdirSync(BACKUP_DIR).filter((f) => /^backup-\d{4}-\d{2}-\d{2}\.sqlite(\.enc)?$/.test(f));
+  const existing = fs.readdirSync(BACKUP_DIR).filter((f) => BACKUP_FILE_RE.test(f));
   if (existing.some((f) => f.startsWith(`backup-${today}.`))) return null;
 
   const tmp = tmpBackupPath();
@@ -82,7 +84,7 @@ export function runDailyBackupIfDue() {
 
     const all = fs
       .readdirSync(BACKUP_DIR)
-      .filter((f) => /^backup-\d{4}-\d{2}-\d{2}\.sqlite(\.enc)?$/.test(f))
+      .filter((f) => BACKUP_FILE_RE.test(f))
       .sort();
     for (const old of all.slice(0, Math.max(0, all.length - RETENTION))) {
       fs.rmSync(path.join(BACKUP_DIR, old), { force: true });
@@ -94,11 +96,56 @@ export function runDailyBackupIfDue() {
   }
 }
 
+function listLocalBackups() {
+  if (!fs.existsSync(BACKUP_DIR)) return [];
+  return fs.readdirSync(BACKUP_DIR).filter((f) => BACKUP_FILE_RE.test(f)).sort();
+}
+
+/** Backup local do dia + envio da cópia externa cifrada (se configurada). */
+export async function runBackupCycle() {
+  runDailyBackupIfDue();
+  const today = getLocalTodayIso();
+  const todayFile = listLocalBackups().find((f) => f.startsWith(`backup-${today}.`));
+  if (!todayFile) return null;
+  const key = encryptionKey();
+  return uploadBackupIfNeeded({
+    backupDir: BACKUP_DIR,
+    localPath: path.join(BACKUP_DIR, todayFile),
+    dateIso: today,
+    hasKey: Boolean(key),
+    encrypt: (buf) => encryptBuffer(buf, key),
+    oldDate: addDaysIso(today, -offsiteRetentionDays()),
+  });
+}
+
+export function backupStatus() {
+  const files = listLocalBackups();
+  const latest = files[files.length - 1] || null;
+  const state = readOffsiteState(BACKUP_DIR);
+  return {
+    local: {
+      count: files.length,
+      retentionDays: RETENTION,
+      latest,
+      latestDate: latest ? latest.slice(7, 17) : null,
+      latestEncrypted: latest ? latest.endsWith('.enc') : false,
+    },
+    encryptionKeyConfigured: Boolean(process.env.BACKUP_ENCRYPTION_KEY),
+    offsite: {
+      ...offsitePublicConfig(),
+      lastUploadDate: state.lastUploadDate || null,
+      lastUploadAt: state.lastUploadAt || null,
+      lastError: state.lastError || null,
+      lastErrorAt: state.lastErrorAt || null,
+    },
+  };
+}
+
 export function startBackupScheduler() {
   if (process.env.DISABLE_AUTO_BACKUP === 'true') return;
-  const tick = () => {
+  const tick = async () => {
     try {
-      runDailyBackupIfDue();
+      await runBackupCycle();
     } catch (err) {
       console.error('[Backup] Falha no backup automático:', err.message);
     }

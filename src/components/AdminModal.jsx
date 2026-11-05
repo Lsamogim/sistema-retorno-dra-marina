@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, UserPlus, ShieldCheck, History, KeyRound } from 'lucide-react';
+import { X, UserPlus, ShieldCheck, History, KeyRound, DatabaseBackup } from 'lucide-react';
 
 const ROLE_LABELS = { admin: 'Administradora', recepcao: 'Recepção' };
 
@@ -400,6 +400,76 @@ function AuditTab() {
   );
 }
 
+function StatusLine({ ok, warn, children }) {
+  const color = ok ? 'var(--status-ok-ink)' : warn ? 'var(--status-soon-ink)' : 'var(--status-overdue-ink)';
+  return (
+    <li style={{ marginBottom: 6 }}>
+      <strong style={{ color }}>{ok ? '✓' : warn ? '!' : '✗'}</strong> {children}
+    </li>
+  );
+}
+
+function BackupsTab() {
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    apiJson('/api/admin/backup-status')
+      .then(setStatus)
+      .catch((err) => setError(err.message));
+  }, []);
+
+  if (error) {
+    return (
+      <div role="alert" style={{ color: 'var(--status-overdue-ink)', fontWeight: 600 }}>
+        {error}
+      </div>
+    );
+  }
+  if (!status) return <p>Carregando...</p>;
+
+  const { local, offsite, encryptionKeyConfigured } = status;
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const offsiteFresh = offsite.lastUploadDate === today;
+
+  return (
+    <div>
+      <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 14px', fontSize: '13.5px' }}>
+        <StatusLine ok={local.latestDate === today} warn={Boolean(local.latestDate)}>
+          Backup diário no servidor:{' '}
+          {local.latest
+            ? `último em ${local.latestDate.split('-').reverse().join('/')} (${local.count} guardados, até ${local.retentionDays} dias)`
+            : 'nenhum ainda (o primeiro é criado 1 minuto após o servidor iniciar)'}
+        </StatusLine>
+        <StatusLine ok={encryptionKeyConfigured}>
+          Criptografia dos backups:{' '}
+          {encryptionKeyConfigured
+            ? 'ativada (AES-256)'
+            : 'desativada — defina BACKUP_ENCRYPTION_KEY no Railway'}
+        </StatusLine>
+        <StatusLine ok={offsite.configured && offsiteFresh} warn={offsite.configured && !offsite.lastError}>
+          Cópia fora do Railway:{' '}
+          {!offsite.configured
+            ? 'não configurada'
+            : offsite.lastUploadDate
+            ? `último envio em ${formatDateTime(offsite.lastUploadAt)} para ${offsite.endpointHost} / ${offsite.bucket} (guardados ${offsite.retentionDays} dias)`
+            : `configurada (${offsite.endpointHost} / ${offsite.bucket}), aguardando o primeiro envio`}
+        </StatusLine>
+      </ul>
+      {offsite.lastError && (
+        <div className="settings-cat-card" style={{ borderColor: 'var(--status-overdue-border)', background: 'var(--status-overdue-bg)', fontSize: '13px' }}>
+          <strong>Último erro no envio externo</strong> ({formatDateTime(offsite.lastErrorAt)}):
+          <div style={{ marginTop: 4 }}>{offsite.lastError}</div>
+        </div>
+      )}
+      <p style={{ fontSize: '12.5px', color: 'var(--ink-secondary)' }}>
+        Os backups não contêm senhas nem sessões. A cópia externa só é enviada cifrada; guarde a chave
+        de criptografia em local seguro fora do sistema, porque sem ela não é possível restaurar.
+      </p>
+    </div>
+  );
+}
+
 export default function AdminModal({ currentUser, onClose }) {
   const [tab, setTab] = useState('users');
 
@@ -422,7 +492,7 @@ export default function AdminModal({ currentUser, onClose }) {
       >
         <div className="panel-header">
           <div>
-            <h2 id="admin-modal-title">Usuárias e auditoria</h2>
+            <h2 id="admin-modal-title">Administração</h2>
             <div className="admin-tabs" role="tablist" aria-label="Seções da administração">
               <button
                 type="button"
@@ -442,6 +512,15 @@ export default function AdminModal({ currentUser, onClose }) {
               >
                 <History size={14} /> Auditoria
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'backups'}
+                className={`admin-tab ${tab === 'backups' ? 'is-active' : ''}`}
+                onClick={() => setTab('backups')}
+              >
+                <DatabaseBackup size={14} /> Backups
+              </button>
             </div>
           </div>
           <button type="button" className="btn-ghost-sm" onClick={onClose} aria-label="Fechar administração">
@@ -449,7 +528,9 @@ export default function AdminModal({ currentUser, onClose }) {
           </button>
         </div>
         <div className="panel-body" role="tabpanel">
-          {tab === 'users' ? <UsersTab currentUserId={currentUser.id} /> : <AuditTab />}
+          {tab === 'users' && <UsersTab currentUserId={currentUser.id} />}
+          {tab === 'audit' && <AuditTab />}
+          {tab === 'backups' && <BackupsTab />}
         </div>
       </div>
     </div>

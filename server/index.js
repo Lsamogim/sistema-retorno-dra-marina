@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import db, { INITIAL_REPORT_PATH, REMOTE_URL_PATH, initDatabase } from './db.js';
 import { apiGuard, purgeExpiredSessions, registerAuthRoutes, requireAdmin } from './auth.js';
 import { audit } from './audit.js';
-import { createSanitizedSnapshot, startBackupScheduler, tmpBackupPath } from './backup.js';
+import { backupStatus, createSanitizedSnapshot, startBackupScheduler, tmpBackupPath } from './backup.js';
 import { importReportBuffer, importReportFile } from './importer.js';
 import { computeDashboardData, getLocalTodayIso } from './returnEngine.js';
 
@@ -527,6 +527,10 @@ app.get('/api/backup', requireAdmin, (req, res, next) => {
     fs.rmSync(tmpPath, { force: true });
     next(err);
   }
+});
+
+app.get('/api/admin/backup-status', requireAdmin, (_req, res) => {
+  res.json(backupStatus());
 });
 
 app.use('/api', (_req, res) => {
