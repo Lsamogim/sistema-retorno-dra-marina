@@ -52,6 +52,7 @@ describe('reasonText', () => {
     expect(reasonText({ stageReason: 'segunda_tentativa', attempt: 3 })).toBe('3ª tentativa');
     expect(reasonText({ stageReason: 'faltou' })).toBe('Faltou — remarcar');
     expect(reasonText({ stageReason: 'atrasado' })).toBe('');
+    expect(reasonText({ stageReason: 'faltou_talvez', scheduledFor: '2026-11-04' })).toBe('Faltou? Estava agendado para 04/11');
   });
 });
 
@@ -60,6 +61,16 @@ describe('doneActionLabel', () => {
     expect(doneActionLabel({ hasDualReturn: true, cyclePhase: 'review' })).toBe('Fez o retoque');
     expect(doneActionLabel({ hasDualReturn: true, cyclePhase: 'renewal' })).toBe('Fez nova aplicação');
     expect(doneActionLabel({ categoryId: 'capilar', cyclePhase: 'renewal' })).toBe('Veio');
+  });
+});
+
+describe('grupo de atrasados antigos', () => {
+  test('só atraso puro há mais de 60 dias', async () => {
+    const { isStaleOverdue } = await import('./stages.js');
+    expect(isStaleOverdue({ stage: 'chamar', stageReason: 'atrasado', daysUntilDue: -61 })).toBe(true);
+    expect(isStaleOverdue({ stage: 'chamar', stageReason: 'segunda_tentativa', daysUntilDue: -90 })).toBe(false);
+    expect(isStaleOverdue({ stage: 'chamar', stageReason: 'faltou', daysUntilDue: -90 })).toBe(false);
+    expect(isStaleOverdue({ stage: 'chamar', stageReason: 'atrasado', daysUntilDue: -60 })).toBe(false);
   });
 });
 

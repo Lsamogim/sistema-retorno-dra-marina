@@ -8,13 +8,6 @@ export const DONE_VISIBLE_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const result = (stage, reason = null, attempt = null) => ({ stage, reason, attempt });
 
-function byDueDate(item, state) {
-  const attempt = (Number(state.contact_attempts) || 0) + 1;
-  if (item.daysUntilDue < 0) return result('chamar', 'atrasado', attempt);
-  if (item.daysUntilDue <= CALL_WINDOW_DAYS) return result('chamar', 'vencendo', attempt);
-  return result('ainda_nao');
-}
-
 /**
  * @param item  item calculado pelo motor (status, daysUntilDue, lastDate, nextScheduled)
  * @param state linha de patient_category_states (ou {})
@@ -29,7 +22,7 @@ export function computeStage(item, state = {}, now = new Date()) {
   if (state.archived) {
     const pauseEnded = state.archived_until && state.archived_until <= today;
     if (!pauseEnded) return result('fora');
-    return byDueDate(item, state);
+    // Pausa vencida: o motor já trata o paciente como ativo; segue o fluxo normal.
   }
 
   if (item.status === 'agendado') return result('agendado', 'planilha');
@@ -38,13 +31,19 @@ export function computeStage(item, state = {}, now = new Date()) {
     return result('concluido');
   }
 
+  // Último atendimento real (qualquer tipo, inclusive retoque), vindo da planilha.
+  const lastAttended = item.lastAttendedDate || item.lastDate || null;
+
   // Agendamento manual: vale até a planilha trazer atendimento nessa data ou depois.
-  if (state.scheduled_for && !(item.lastDate && item.lastDate >= state.scheduled_for)) {
+  if (state.scheduled_for && !(lastAttended && lastAttended >= state.scheduled_for)) {
     if (state.scheduled_for >= today) return result('agendado', 'manual');
-    return result('chamar', 'faltou', attempt);
+    // A data passou e a planilha ainda não confirmou: perguntar se veio ("Faltou?").
+    return result('chamar', 'faltou_talvez', attempt);
   }
 
-  if (state.no_show_at && (!state.contacted_at || state.no_show_at > state.contacted_at)) {
+  const noShowDay = state.no_show_at ? String(state.no_show_at).slice(0, 10) : null;
+  const attendedAfterNoShow = noShowDay && lastAttended && lastAttended >= noShowDay;
+  if (state.no_show_at && !attendedAfterNoShow && (!state.contacted_at || state.no_show_at > state.contacted_at)) {
     return result('chamar', 'faltou', attempt);
   }
 

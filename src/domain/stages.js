@@ -15,7 +15,9 @@ export function stageLabel(id) {
 export const TODAY_STAGE_IDS = STAGES.map((s) => s.id);
 export const STALE_OVERDUE_DAYS = 60;
 
-export const isStaleOverdue = (item) => item.stage === 'chamar' && item.daysUntilDue < -STALE_OVERDUE_DAYS;
+// Só o atraso puro vai para o grupo de antigos; 2ª tentativa, falta e confirmação ficam visíveis.
+export const isStaleOverdue = (item) =>
+  item.stage === 'chamar' && (item.stageReason ?? 'atrasado') === 'atrasado' && item.daysUntilDue < -STALE_OVERDUE_DAYS;
 
 const SORTERS = {
   chamar: (a, b) => {

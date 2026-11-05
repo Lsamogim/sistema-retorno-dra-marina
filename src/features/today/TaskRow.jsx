@@ -54,6 +54,21 @@ export function TaskRow({ item, moved, canUndo, handlers }) {
   let menuItems = [];
   switch (item.stage) {
     case 'chamar':
+      if (item.stageReason === 'faltou_talvez') {
+        // Agendamento manual vencido: primeiro confirmar se a paciente veio.
+        primary = (
+          <Button variant="primary" onClick={() => handlers.done(item)}>
+            {doneActionLabel(item)}
+          </Button>
+        );
+        menuItems = [
+          { label: 'Faltou', onSelect: () => handlers.noShow(item) },
+          { label: 'Remarcar', onSelect: () => handlers.schedule(item) },
+          ...(item.whatsappNumber ? [{ label: 'Enviar WhatsApp', onSelect: () => handlers.whatsapp(item) }] : []),
+          { label: 'Abrir ficha', onSelect: () => handlers.open(item) },
+        ];
+        break;
+      }
       primary = item.whatsappNumber ? (
         <Button variant="primary" icon={<MessageCircle size={18} />} onClick={() => handlers.whatsapp(item)}>
           Enviar WhatsApp

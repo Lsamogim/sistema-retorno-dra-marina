@@ -37,20 +37,21 @@ const dashboard = {
       it(7, 'fora'),
       it(8, 'chamar', { daysUntilDue: -200 }),
       it(9, 'chamar', { daysUntilDue: -75 }),
+      it(10, 'chamar', { daysUntilDue: -90, stageReason: 'segunda_tentativa' }),
     ],
   },
 };
 
 test('buildTodayData conta só as 4 etapas do dia', () => {
   const t = buildTodayData(dashboard);
-  assert.deepEqual(t.counts, { chamar: 2, chamarAntigos: 2, aguardando: 1, agendado: 1, concluido: 1 });
-  assert.equal(t.items.length, 7);
+  assert.deepEqual(t.counts, { chamar: 3, chamarAntigos: 2, aguardando: 1, agendado: 1, concluido: 1 });
+  assert.equal(t.items.length, 8);
   assert.ok(t.items.every((i) => !['ainda_nao', 'fora'].includes(i.stage)));
 });
 
 test('chamar: recentes do mais atrasado ao menos urgente, depois antigos do mais recente ao mais antigo', () => {
   const chamar = buildTodayData(dashboard).items.filter((i) => i.stage === 'chamar');
-  assert.deepEqual(chamar.map((i) => i.patientId), [2, 1, 9, 8]);
+  assert.deepEqual(chamar.map((i) => i.patientId), [10, 2, 1, 9, 8]);
 });
 
 test('atrasados há mais de 60 dias marcados como staleOverdue', () => {
@@ -58,6 +59,7 @@ test('atrasados há mais de 60 dias marcados como staleOverdue', () => {
   assert.equal(byId[9].staleOverdue, true);
   assert.equal(byId[8].staleOverdue, true);
   assert.equal(byId[2].staleOverdue, false);
+  assert.equal(byId[10].staleOverdue, false, '2ª tentativa nunca vai para o grupo de antigos');
 });
 
 test('buildTodayData devolve data de referência e categorias', () => {

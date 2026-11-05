@@ -16,11 +16,25 @@ test('arquivado sem pausa → fora', () => {
 
 test('pausa vencida com atraso → chamar/atrasado', () => {
   const r = computeStage(
-    item({ status: 'arquivado', daysUntilDue: -3 }),
+    item({ status: 'atrasado', daysUntilDue: -3 }),
     { archived: 1, archived_until: '2026-11-01' },
     now
   );
   assert.deepEqual(r, { stage: 'chamar', reason: 'atrasado', attempt: 1 });
+});
+
+test('pausa vencida e contato recente → aguardando', () => {
+  const r = computeStage(
+    item({ status: 'aguardando', daysUntilDue: -3 }),
+    { archived: 1, archived_until: '2026-11-01', contacted_at: hoursAgo(5), contact_attempts: 1 },
+    now
+  );
+  assert.equal(r.stage, 'aguardando');
+});
+
+test('pausa vencida e agendamento manual → agendado', () => {
+  const r = computeStage(item({ status: 'atrasado', daysUntilDue: -3 }), { archived: 1, archived_until: '2026-11-01', scheduled_for: '2026-11-08' }, now);
+  assert.equal(r.stage, 'agendado');
 });
 
 test('pausa futura → fora', () => {
@@ -53,13 +67,31 @@ test('agendou para hoje → agendado/manual', () => {
   assert.equal(r.stage, 'agendado');
 });
 
-test('agendou para ontem sem atendimento → chamar/faltou', () => {
+test('agendou para ontem sem atendimento → chamar/faltou_talvez (confirmar se veio)', () => {
   const r = computeStage(
-    item({ status: 'atrasado', daysUntilDue: -2, lastDate: '2026-10-20' }),
+    item({ status: 'atrasado', daysUntilDue: -2, lastDate: '2026-10-20', lastAttendedDate: '2026-10-20' }),
     { scheduled_for: '2026-11-04' },
     now
   );
-  assert.deepEqual(r, { stage: 'chamar', reason: 'faltou', attempt: 1 });
+  assert.deepEqual(r, { stage: 'chamar', reason: 'faltou_talvez', attempt: 1 });
+});
+
+test('agendamento manual usa o último atendimento (inclui retoque), não só o procedimento', () => {
+  const r = computeStage(
+    item({ status: 'em_dia', daysUntilDue: 150, lastDate: '2026-10-01', lastAttendedDate: '2026-10-16' }),
+    { scheduled_for: '2026-10-16' },
+    now
+  );
+  assert.equal(r.stage, 'ainda_nao');
+});
+
+test('falta manual é ignorada quando há atendimento depois dela', () => {
+  const r = computeStage(
+    item({ status: 'atrasado', daysUntilDue: -1, lastAttendedDate: '2026-11-03' }),
+    { no_show_at: '2026-10-20T10:00:00Z' },
+    now
+  );
+  assert.equal(r.reason, 'atrasado');
 });
 
 test('agendou para ontem e a planilha trouxe atendimento → ignora scheduled_for', () => {

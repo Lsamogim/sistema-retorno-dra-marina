@@ -26,7 +26,19 @@ export function StageActions({ item, moved, canUndo, handlers, onAddPhone }) {
   }
   const reason = reasonText(item);
   let buttons = [];
-  if (item.stage === 'chamar') {
+  if (item.stage === 'chamar' && item.stageReason === 'faltou_talvez') {
+    buttons = [
+      <Button key="d" variant="primary" onClick={() => handlers.done(item)}>
+        {doneActionLabel(item)}
+      </Button>,
+      <Button key="f" variant="secondary" onClick={() => handlers.noShow(item)}>
+        Faltou
+      </Button>,
+      <Button key="r" variant="ghost" onClick={() => handlers.schedule(item)}>
+        Remarcar
+      </Button>,
+    ];
+  } else if (item.stage === 'chamar') {
     buttons = [
       item.whatsappNumber ? (
         <Button key="w" variant="primary" icon={<MessageCircle size={18} />} onClick={() => handlers.whatsapp(item)}>

@@ -26,6 +26,7 @@ const mk = (over) => ({
 });
 const karina = mk({ patientId: 1, patientName: 'Karina Cardoso' });
 const semTelefone = mk({ patientId: 2, patientName: 'Ana Duarte', whatsappNumber: null, categoryId: 'laser', categoryName: 'Laser', effectiveIntervalDays: 30 });
+const confirmar = mk({ patientId: 4, patientName: 'Bruna Lacerda', stageReason: 'faltou_talvez', scheduledFor: '2026-11-03', categoryId: 'laser', categoryName: 'Laser', effectiveIntervalDays: 30 });
 const agendada = mk({ patientId: 3, patientName: 'Sabrina Sampaio', stage: 'agendado', stageReason: 'manual', scheduledFor: '2026-11-10', categoryId: 'botox', categoryName: 'Botox', hasDualReturn: true, cyclePhase: 'review' });
 
 function setup(url = '/hoje') {
@@ -51,7 +52,7 @@ beforeEach(() => {
       { id: 'laser', name: 'Laser' },
       { id: 'botox', name: 'Botox' },
     ],
-    items: [karina, semTelefone, agendada],
+    items: [karina, semTelefone, agendada, confirmar],
   });
   endpoints.act.mockImplementation(async (patientId, categoryId, body) => {
     const map = { contacted: 'aguardando', archive: 'fora', scheduled: 'agendado' };
@@ -105,11 +106,19 @@ describe('TodayPage', () => {
     expect(screen.getByRole('listitem', { name: /Karina Cardoso/ })).toBeInTheDocument();
   });
 
+  test('agendamento manual vencido pergunta "Faltou?" e oferece Veio', async () => {
+    await setup();
+    const row = screen.getByRole('listitem', { name: /Bruna Lacerda/ });
+    expect(row).toHaveTextContent('Faltou? Estava agendado para 03/11');
+    await userEvent.click(within(row).getByRole('button', { name: 'Veio' }));
+    expect(endpoints.act).toHaveBeenCalledWith(4, 'laser', expect.objectContaining({ action: 'done' }));
+  });
+
   test('filtro de procedimento e busca reduzem a lista', async () => {
     await setup();
-    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
     fireEvent.change(screen.getByLabelText('Procedimento'), { target: { value: 'laser' } });
-    expect(screen.getAllByRole('listitem')).toHaveLength(1);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
     expect(screen.getByRole('listitem', { name: /Ana Duarte/ })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Procedimento'), { target: { value: '' } });
     await userEvent.type(screen.getByLabelText('Buscar paciente'), 'karina');

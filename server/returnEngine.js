@@ -138,6 +138,11 @@ export function computeDashboardData(referenceDateIso) {
   const patientMap = new Map(patients.map((p) => [p.id, p]));
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
   const stateMap = new Map(states.map((s) => [`${s.patient_id}:${s.category_id}`, s]));
+  // Último atendimento real (qualquer tipo, sem faltas) por paciente/procedimento.
+  const lastAttendedByKey = new Map();
+  // Pausa vencida (archived_until no passado) = paciente de volta ao fluxo normal.
+  const isEffectivelyArchived = (state) =>
+    Boolean(state.archived) && !(state.archived_until && state.archived_until <= today);
   const phoneHints = buildPhoneHintsMap(patients);
 
   // Agrupar agendamentos por (patient_id, category_id)
@@ -198,6 +203,7 @@ export function computeDashboardData(referenceDateIso) {
         futureScheduled.push(ev);
       } else {
         pastCompleted.push(ev);
+        lastAttendedByKey.set(key, ev.appointment_date);
       }
     }
 
@@ -237,7 +243,7 @@ export function computeDashboardData(referenceDateIso) {
         whatsappMessage: message,
         reviewWhatsappMessage: null,
         renewalWhatsappMessage: message,
-        status: state.archived ? 'arquivado' : isRenewalDone ? 'em_dia' : 'agendado',
+        status: isEffectivelyArchived(state) ? 'arquivado' : isRenewalDone ? 'em_dia' : 'agendado',
         cyclePhase: 'scheduled_first',
         cycleKey: `${nextScheduledEv.appointment_date}:scheduled_first`,
         cycleLabel: '1º Agendamento Futuro',
@@ -308,7 +314,7 @@ export function computeDashboardData(referenceDateIso) {
         whatsappMessage: message,
         reviewWhatsappMessage: null,
         renewalWhatsappMessage: message,
-        status: state.archived
+        status: isEffectivelyArchived(state)
           ? 'arquivado'
           : isRenewalDone
           ? 'em_dia'
@@ -498,7 +504,7 @@ export function computeDashboardData(referenceDateIso) {
     const activeMilestoneDone = cyclePhase === 'review' ? reviewDone : renewalDone;
 
     let status;
-    if (state.archived) {
+    if (isEffectivelyArchived(state)) {
       status = 'arquivado';
     } else if (activeMilestoneDone) {
       status = 'em_dia';
@@ -637,6 +643,7 @@ export function computeDashboardData(referenceDateIso) {
   for (const list of Object.values(itemsByCategory)) {
     for (const item of list) {
       const state = stateMap.get(`${item.patientId}:${item.categoryId}`) || {};
+      item.lastAttendedDate = lastAttendedByKey.get(`${item.patientId}:${item.categoryId}`) || null;
       const { stage, reason, attempt } = computeStage(item, state, stageNow);
       Object.assign(item, {
         stage,
@@ -760,7 +767,9 @@ const TODAY_STAGES = ['chamar', 'aguardando', 'agendado', 'concluido'];
 // Quem está atrasado há mais de 60 dias vai para um grupo à parte no fim da etapa Chamar:
 // com o histórico acumulado, a lista do dia ficaria dominada por contatos antigos.
 export const STALE_OVERDUE_DAYS = 60;
-const isStale = (item) => item.stage === 'chamar' && item.daysUntilDue < -STALE_OVERDUE_DAYS;
+// Só o atraso puro vai para o grupo de antigos; 2ª tentativa, falta e confirmação ficam visíveis.
+const isStale = (item) =>
+  item.stage === 'chamar' && (item.stageReason ?? 'atrasado') === 'atrasado' && item.daysUntilDue < -STALE_OVERDUE_DAYS;
 const TODAY_SORTERS = {
   chamar: (a, b) => {
     const sa = isStale(a);
