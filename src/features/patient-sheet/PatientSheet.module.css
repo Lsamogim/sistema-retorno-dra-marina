@@ -1,0 +1,178 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.section:last-child {
+  border-bottom: 0;
+}
+
+.sectionTitle {
+  font-size: var(--text-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.help {
+  color: var(--color-ink-2);
+  font-size: var(--text-meta);
+  line-height: var(--lh-meta);
+}
+
+.actionCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-muted);
+}
+
+.actionMoved {
+  background: var(--status-done-bg);
+  border-color: var(--status-done-border);
+}
+
+.actionHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.actionTitle {
+  font-size: var(--text-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--weight-semibold);
+}
+
+.reason {
+  color: var(--status-late-fg);
+}
+
+.movedText {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--status-done-fg);
+  font-size: var(--text-meta);
+  font-weight: var(--weight-semibold);
+}
+
+.actionButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.procedure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.procedureHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.procedureTitle {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-bold);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+}
+
+.facts dt {
+  font-size: var(--text-caption);
+  line-height: var(--lh-caption);
+  color: var(--color-ink-3);
+}
+
+.facts dd {
+  margin: 0;
+  font-size: var(--text-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--weight-semibold);
+}
+
+.procedureFields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.outBox {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--status-out-bg);
+  color: var(--status-out-fg);
+  font-size: var(--text-meta);
+}
+
+.collapsible {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.collapsible summary {
+  min-height: var(--control-h);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-meta);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.collapsibleBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-4) var(--space-4);
+}
+
+.history {
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  list-style: none;
+}
+
+.history li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-meta);
+  line-height: var(--lh-meta);
+}
+
+.historyDate {
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.historySituation {
+  color: var(--color-ink-3);
+}

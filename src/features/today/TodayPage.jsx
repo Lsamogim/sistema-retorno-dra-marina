@@ -4,11 +4,9 @@ import { Button, EmptyState, Select, StageTabs } from '../../ui/index.js';
 import { useRoute, withQuery } from '../../app/router.jsx';
 import { useToday } from '../../state/useToday.jsx';
 import { STAGES, isStaleOverdue, stageLabel } from '../../domain/stages.js';
-import { doneMilestone } from '../../domain/vocab.js';
 import { formatLongDate } from '../../domain/dates.js';
 import { TaskRow } from './TaskRow.jsx';
-import { ArchiveDialog, ScheduleDialog } from './Dialogs.jsx';
-import { openWhatsApp } from './whatsapp.js';
+import { useTaskActions } from './useTaskActions.jsx';
 import styles from './Today.module.css';
 
 const EMPTY_TITLES = {
@@ -28,7 +26,7 @@ export function TodayPage() {
   const { path, query, navigate } = useRoute();
   const today = useToday();
   const [search, setSearch] = useState('');
-  const [dialog, setDialog] = useState(null); // {type:'schedule'|'archive', item}
+  const { handlers, dialogs } = useTaskActions();
 
   const stage = STAGES.some((s) => s.id === query.get('etapa')) ? query.get('etapa') : 'chamar';
   const proc = query.get('proc') || '';
@@ -64,21 +62,6 @@ export function TodayPage() {
   const stageTabs = STAGES.map((s) => ({ ...s, count: today.counts[s.id] }));
   const goStage = (id) => navigate(withQuery(path, query, { etapa: id }), { replace: true });
 
-  const handlers = {
-    whatsapp: (item) => {
-      openWhatsApp(item);
-      today.act(item, { action: 'contacted', cycleKey: item.cycleKey });
-    },
-    addPhone: (item) => navigate(`/pacientes/${item.patientId}?campo=telefone`),
-    schedule: (item) => setDialog({ type: 'schedule', item }),
-    archive: (item) => setDialog({ type: 'archive', item }),
-    done: (item) => today.act(item, { action: 'done', milestone: doneMilestone(item), anchorDate: item.anchorDate }),
-    noShow: (item) => today.act(item, { action: 'no_show' }),
-    undo: (item) => today.undo(today.keyOf(item)),
-    open: (item) => navigate(`/pacientes/${item.patientId}`),
-    view: (toStage) => navigate(STAGES.some((s) => s.id === toStage) ? `/hoje?etapa=${toStage}` : `/pacientes?situacao=${toStage}`),
-  };
-
   const renderRow = (item) => (
     <TaskRow
       key={today.keyOf(item)}
@@ -90,10 +73,6 @@ export function TodayPage() {
   );
 
   const busiest = STAGES.filter((s) => s.id !== stage && today.counts[s.id] > 0).sort((a, b) => today.counts[b.id] - today.counts[a.id])[0];
-  const patientCategories = dialog
-    ? [...new Set(today.items.filter((i) => i.patientId === dialog.item.patientId).map((i) => i.categoryName))]
-    : [];
-
   return (
     <div className={styles.page}>
       <header className={styles.header}>
@@ -154,29 +133,7 @@ export function TodayPage() {
         </>
       )}
 
-      {dialog?.type === 'schedule' && (
-        <ScheduleDialog
-          item={dialog.item}
-          onCancel={() => setDialog(null)}
-          onConfirm={(date) => {
-            const item = dialog.item;
-            setDialog(null);
-            today.act(item, { action: 'scheduled', date });
-          }}
-        />
-      )}
-      {dialog?.type === 'archive' && (
-        <ArchiveDialog
-          item={dialog.item}
-          patientCategories={patientCategories}
-          onCancel={() => setDialog(null)}
-          onConfirm={(body) => {
-            const item = dialog.item;
-            setDialog(null);
-            today.act(item, body);
-          }}
-        />
-      )}
+      {dialogs}
     </div>
   );
 }
