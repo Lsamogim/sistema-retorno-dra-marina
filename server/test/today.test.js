@@ -1,12 +1,18 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'retornos-today-'));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'retornos-today-'));
+process.env.DATA_DIR = tmpDir;
 process.env.APP_PASSWORD = 'senha-teste-1234';
 const { buildTodayData } = await import('../returnEngine.js');
+const { default: db } = await import('../db.js');
+after(() => {
+  db.close();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
 
 const it = (patientId, stage, extra = {}) => ({
   patientId,

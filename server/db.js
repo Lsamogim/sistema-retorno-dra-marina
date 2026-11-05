@@ -33,9 +33,10 @@ export const DB_PATH = path.join(DATA_DIR, 'clinica-retorno.sqlite');
 export const INITIAL_REPORT_PATH = path.join(DATA_DIR, 'relatorio-dra-marina.xlsx');
 export const REMOTE_URL_PATH = path.join(DATA_DIR, 'remote-url.txt');
 
-// Se estivermos rodando na nuvem com volume persistente montado em DATA_DIR (ex: /data),
-// copiar o banco inicial e a planilha da pasta do código na primeira inicialização:
-if (DATA_DIR !== BUNDLE_DATA_DIR) {
+// Cópia inicial do banco/planilha da pasta do código para outro DATA_DIR: só com pedido
+// explícito (SEED_FROM_BUNDLE=1). Esses arquivos contêm dados reais de pacientes e não
+// podem ser duplicados por acidente (ex.: testes ou servidores de verificação).
+if (DATA_DIR !== BUNDLE_DATA_DIR && process.env.SEED_FROM_BUNDLE === '1') {
   const seedDb = path.join(BUNDLE_DATA_DIR, 'clinica-retorno.sqlite');
   const seedXlsx = path.join(BUNDLE_DATA_DIR, 'relatorio-dra-marina.xlsx');
   try {

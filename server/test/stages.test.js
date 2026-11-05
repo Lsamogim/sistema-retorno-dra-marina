@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -112,4 +112,5 @@ test('migração cria colunas e user_version 2', async () => {
   }
   assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
   db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });

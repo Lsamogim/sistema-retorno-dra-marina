@@ -1,10 +1,15 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'retornos-actions-'));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'retornos-actions-'));
+process.env.DATA_DIR = tmpDir;
+after(() => {
+  db.close();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
 process.env.APP_PASSWORD = 'senha-teste-1234';
 const { initDatabase, default: db } = await import('../db.js');
 initDatabase();
