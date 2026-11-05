@@ -4,17 +4,34 @@ import styles from './Overlay.module.css';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+// Sobreposições abertas, em ordem de abertura. Responde a Esc/Tab só a mais recente entre
+// as que não têm outra sobreposição aberta dentro delas (diálogo dentro da ficha vence a ficha).
+const overlayStack = [];
+
+function isTopOverlay(entry) {
+  const candidates = overlayStack.filter(
+    (e) => !overlayStack.some((other) => other !== e && e.panel.current?.contains(other.panel.current))
+  );
+  return candidates[candidates.length - 1] === entry;
+}
+
 /** Prende o foco dentro do painel, fecha com Esc e devolve o foco a quem abriu. */
 function useModalFocus(open, panelRef, initialFocusRef, onClose) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!open) return undefined;
+    const entry = { panel: panelRef };
+    overlayStack.push(entry);
     const previouslyFocused = document.activeElement;
     (initialFocusRef.current || panelRef.current)?.focus();
 
     const onKeyDown = (e) => {
+      if (!isTopOverlay(entry)) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose?.();
+        onCloseRef.current?.();
         return;
       }
       if (e.key !== 'Tab' || !panelRef.current) return;
@@ -32,6 +49,8 @@ function useModalFocus(open, panelRef, initialFocusRef, onClose) {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => {
+      const idx = overlayStack.indexOf(entry);
+      if (idx !== -1) overlayStack.splice(idx, 1);
       document.removeEventListener('keydown', onKeyDown);
       if (previouslyFocused && typeof previouslyFocused.focus === 'function') previouslyFocused.focus();
     };

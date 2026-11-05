@@ -138,3 +138,25 @@ describe('Dialog', () => {
     expect(onCancel).toHaveBeenCalled();
   });
 });
+
+describe('pilha de sobreposições', () => {
+  function Nested() {
+    const [sheet, setSheet] = useState(true);
+    const [dialog, setDialog] = useState(true);
+    return (
+      <Sheet open={sheet} title="Ficha" onClose={() => setSheet(false)}>
+        <Dialog open={dialog} title="Confirmar" confirmLabel="Ok" onConfirm={() => {}} onCancel={() => setDialog(false)} />
+      </Sheet>
+    );
+  }
+
+  test('Esc fecha só o diálogo do topo, não a ficha por baixo', async () => {
+    render(<Nested />);
+    expect(screen.getByRole('alertdialog', { name: 'Confirmar' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Ficha' })).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
