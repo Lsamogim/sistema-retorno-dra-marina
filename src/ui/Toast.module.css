@@ -38,13 +38,23 @@
   padding: 0 var(--space-3);
   border: 0;
   border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-highlight);
+  background: var(--color-highlight);
+  color: var(--color-ink);
   font-weight: var(--weight-bold);
   font-size: var(--text-meta);
 }
 
+.action + .action {
+  background: transparent;
+  color: var(--color-ink-on-dark);
+  text-decoration: underline;
+}
+
 .action:hover {
+  filter: brightness(0.95);
+}
+
+.action + .action:hover {
   background: var(--color-on-dark-hover);
 }
 
