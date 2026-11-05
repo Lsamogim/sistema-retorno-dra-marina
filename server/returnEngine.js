@@ -9,6 +9,7 @@ const STOPWORDS = new Set([
 
 export { getLocalTodayIso, addDaysIso, diffDaysIso } from './dates.js';
 import { getLocalTodayIso, addDaysIso, diffDaysIso } from './dates.js';
+import { computeStage } from './stages.js';
 
 export function formatBrDate(isoDate) {
   if (!isoDate) return '';
@@ -630,6 +631,28 @@ export function computeDashboardData(referenceDateIso) {
     };
   }
 
+  // Etapa do fluxo de trabalho (Chamar, Aguardando, Agendados, Concluídos...) para cada item.
+  const stageNow = referenceDateIso ? new Date(`${referenceDateIso}T15:00:00Z`) : new Date();
+  const categoryNames = new Map(categories.map((c) => [c.id, c.name]));
+  for (const list of Object.values(itemsByCategory)) {
+    for (const item of list) {
+      const state = stateMap.get(`${item.patientId}:${item.categoryId}`) || {};
+      const { stage, reason, attempt } = computeStage(item, state, stageNow);
+      Object.assign(item, {
+        stage,
+        stageReason: reason,
+        attempt,
+        categoryName: categoryNames.get(item.categoryId) || item.categoryId,
+        contactedAt: state.contacted_at || null,
+        scheduledFor: state.scheduled_for || null,
+        doneAt: state.done_at || null,
+        contactAttempts: Number(state.contact_attempts) || 0,
+        archivedUntil: state.archived_until || null,
+        noShowAt: state.no_show_at || null,
+      });
+    }
+  }
+
   const categorySummaries = categories.map((cat) => {
     const items = itemsByCategory[cat.id] || [];
     items.sort((a, b) => {
@@ -730,5 +753,43 @@ export function computeDashboardData(referenceDateIso) {
       name: p.display_name,
       phone: p.phone_manual || p.phone_imported || '',
     })),
+  };
+}
+
+const TODAY_STAGES = ['chamar', 'aguardando', 'agendado', 'concluido'];
+// Quem está atrasado há mais de 60 dias vai para um grupo à parte no fim da etapa Chamar:
+// com o histórico acumulado, a lista do dia ficaria dominada por contatos antigos.
+export const STALE_OVERDUE_DAYS = 60;
+const isStale = (item) => item.stage === 'chamar' && item.daysUntilDue < -STALE_OVERDUE_DAYS;
+const TODAY_SORTERS = {
+  chamar: (a, b) => {
+    const sa = isStale(a);
+    const sb = isStale(b);
+    if (sa !== sb) return sa ? 1 : -1;
+    return sa ? b.daysUntilDue - a.daysUntilDue : a.daysUntilDue - b.daysUntilDue;
+  },
+  aguardando: (a, b) => String(a.contactedAt || '').localeCompare(String(b.contactedAt || '')),
+  agendado: (a, b) =>
+    String(a.scheduledFor || a.nextScheduled?.date || '').localeCompare(String(b.scheduledFor || b.nextScheduled?.date || '')),
+  concluido: (a, b) => String(b.doneAt || '').localeCompare(String(a.doneAt || '')),
+};
+
+/** Lista do dia: só os itens das 4 etapas, ordenados por etapa, com contadores. */
+export function buildTodayData(dashboard) {
+  const all = Object.values(dashboard.itemsByCategory).flat();
+  const counts = { chamar: 0, chamarAntigos: 0, aguardando: 0, agendado: 0, concluido: 0 };
+  const byStage = Object.fromEntries(TODAY_STAGES.map((s) => [s, []]));
+  for (const item of all) {
+    if (byStage[item.stage]) {
+      const staleOverdue = isStale(item);
+      byStage[item.stage].push({ ...item, staleOverdue });
+      counts[staleOverdue ? 'chamarAntigos' : item.stage] += 1;
+    }
+  }
+  return {
+    referenceDate: dashboard.referenceDate,
+    counts,
+    categories: dashboard.categories.map((c) => ({ id: c.id, name: c.name, shortName: c.shortName })),
+    items: TODAY_STAGES.flatMap((s) => byStage[s].sort(TODAY_SORTERS[s])),
   };
 }

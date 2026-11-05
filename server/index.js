@@ -9,7 +9,7 @@ import { apiGuard, purgeExpiredSessions, registerAuthRoutes, requireAdmin } from
 import { audit } from './audit.js';
 import { backupStatus, createSanitizedSnapshot, startBackupScheduler, tmpBackupPath } from './backup.js';
 import { importReportBuffer, importReportFile } from './importer.js';
-import { computeDashboardData, getLocalTodayIso } from './returnEngine.js';
+import { buildTodayData, computeDashboardData, getLocalTodayIso } from './returnEngine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.resolve(__dirname, '..', 'dist');
@@ -141,6 +141,16 @@ app.get('/api/dashboard', (req, res, next) => {
         ? req.query.date
         : undefined;
     const data = computeDashboardData(refDate);
+    auditDashboardView(req);
+    res.json(data);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/today', (req, res, next) => {
+  try {
+    const data = buildTodayData(computeDashboardData());
     auditDashboardView(req);
     res.json(data);
   } catch (err) {
