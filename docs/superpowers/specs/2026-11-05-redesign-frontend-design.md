@@ -60,7 +60,7 @@ Fora do fluxo do dia (só na tela **Pacientes**): **Ainda não é hora** (próxi
 | Agendou (data) | `scheduled_for = data` | Agendados |
 | Remarcar (data) | `scheduled_for = nova data` | Agendados |
 | Veio / Fez o retoque / Fez nova aplicação | marca o marco ativo como feito (`review`/`renewal` atuais) + `done_at = agora`; limpa `scheduled_for`, `contacted_at`, `contact_attempts` | Concluídos (7 dias) → Ainda não é hora |
-| Faltou | limpa `scheduled_for` | Chamar ("Faltou — remarcar") |
+| Faltou | limpa `scheduled_for`, `no_show_at = agora` | Chamar ("Faltou — remarcar") |
 | Não vai voltar (motivo) | `archived = 1`, motivo; "Pausar até" grava `archived_until` | Fora da lista (Pacientes) |
 | Desfazer | restaura o estado anterior exato (snapshot devolvido pela ação) | etapa original |
 
@@ -159,8 +159,8 @@ src/
 
 ### 5.2 Servidor
 1. `returnEngine` passa a devolver `stage` em cada item: `chamar | aguardando | agendado | concluido | ainda_nao | fora`, além de `attempt` (nº da tentativa) e `reason` (`atrasado | vencendo | segunda_tentativa | faltou`).
-2. Novas colunas em `patient_category_states`: `scheduled_for TEXT`, `done_at TEXT`, `contact_attempts INTEGER DEFAULT 0`, `archived_until TEXT` (migração numerada via `PRAGMA user_version`).
-3. Regras: aguardando expira em 3 dias (`contacted_at`); concluído visível por 7 dias (`done_at`); `scheduled_for` passado sem atendimento → chamar/`faltou`; `archived_until` passado → volta ao fluxo.
+2. Novas colunas em `patient_category_states`: `scheduled_for TEXT`, `done_at TEXT`, `contact_attempts INTEGER DEFAULT 0`, `archived_until TEXT`, `no_show_at TEXT` (migração numerada via `PRAGMA user_version`).
+3. Regras: aguardando expira em 3 dias (`contacted_at`); concluído visível por 7 dias (`done_at`); `scheduled_for` passado sem atendimento → chamar/`faltou` (e `scheduled_for` é ignorado quando já existe atendimento na planilha nessa data ou depois); `archived_until` passado → volta ao fluxo.
 4. `PATCH /api/patients/:id/categories/:cat` aceita `{action: 'contacted'|'scheduled'|'done'|'no_show'|'archive'|'unarchive', ...}` e responde `{item, before}`; `POST /api/patients/:id/categories/:cat/restore` recebe o `before` e o restaura (inclusive o caso "todos os procedimentos", com um `before` por categoria). O formato atual do PATCH continua aceito durante a transição.
 5. `GET /api/today` devolve os itens das 4 etapas com contadores; `GET /api/dashboard` permanece para Pacientes/compatibilidade.
 6. Auditoria registra as novas ações (`contacted`, `scheduled`, `done`, `no_show`, `restore`).
