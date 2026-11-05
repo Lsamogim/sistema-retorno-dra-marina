@@ -1,0 +1,114 @@
+.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5) var(--space-4);
+  background: var(--color-canvas);
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--space-6) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-xs);
+  background: var(--color-brand);
+  color: var(--color-ink-on-dark);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-meta);
+}
+
+.markLg {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-section);
+}
+
+.brandName {
+  font-weight: var(--weight-bold);
+}
+
+.brandSub {
+  font-size: var(--text-meta);
+  line-height: var(--lh-meta);
+  color: var(--color-ink-3);
+}
+
+.title {
+  font-size: var(--text-title);
+  line-height: var(--lh-title);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  margin-top: var(--space-2);
+  color: var(--color-ink-2);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-5);
+}
+
+.alert {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--status-late-bg);
+  color: var(--status-late-fg);
+  font-size: var(--text-meta);
+  line-height: var(--lh-meta);
+  font-weight: var(--weight-semibold);
+}
+
+.info {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--status-waiting-bg);
+  color: var(--status-waiting-fg);
+  font-size: var(--text-meta);
+  line-height: var(--lh-meta);
+}
+
+.secondaryAction {
+  margin-top: var(--space-3);
+  text-align: center;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  font-size: var(--text-meta);
+  color: var(--color-ink-2);
+}
+
+.check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--color-brand);
+}

@@ -6,11 +6,10 @@ import '@fontsource/plus-jakarta-sans/600.css';
 import '@fontsource/plus-jakarta-sans/700.css';
 import './styles/tokens.css';
 import './styles/base.css';
-import App from './App.jsx';
-import './styles.css';
+import { AppShell } from './app/AppShell.jsx';
 
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <AppShell />
   </React.StrictMode>
 );
