@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import db, { INITIAL_REPORT_PATH, REMOTE_URL_PATH, initDatabase } from './db.js';
 import { apiGuard, purgeExpiredSessions, registerAuthRoutes, requireAdmin } from './auth.js';
 import { audit } from './audit.js';
+import { applyAction, restoreStates } from './stateActions.js';
 import { backupStatus, createSanitizedSnapshot, startBackupScheduler, tmpBackupPath } from './backup.js';
 import { importReportBuffer, importReportFile } from './importer.js';
 import { buildTodayData, computeDashboardData, getLocalTodayIso } from './returnEngine.js';
@@ -334,8 +335,54 @@ app.post('/api/patients/:id/merge', (req, res, next) => {
   }
 });
 
+function itemsForPatient(patientId) {
+  const dashboard = computeDashboardData();
+  return Object.values(dashboard.itemsByCategory)
+    .flat()
+    .filter((item) => item.patientId === patientId);
+}
+
+function checkPatientAndCategory(res, patientId, categoryId) {
+  if (!Number.isInteger(patientId) || patientId <= 0) {
+    res.status(400).json({ error: { code: 'INVALID_ID', message: 'Paciente inválido.' } });
+    return false;
+  }
+  const patExists = db.prepare('SELECT 1 FROM patients WHERE id = ?').get(patientId);
+  const catExists = db.prepare('SELECT 1 FROM categories WHERE id = ?').get(categoryId);
+  if (!patExists || !catExists) {
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Paciente ou procedimento não encontrado.' } });
+    return false;
+  }
+  return true;
+}
+
+app.post('/api/patients/:id/categories/:categoryId/restore', (req, res, next) => {
+  try {
+    const patientId = Number(req.params.id);
+    const { categoryId } = req.params;
+    if (!checkPatientAndCategory(res, patientId, categoryId)) return;
+    restoreStates(patientId, req.body?.before);
+    audit(req, 'restore', { targetType: 'patient', targetId: patientId, details: { category: categoryId } });
+    res.json({ ok: true, items: itemsForPatient(patientId) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
   try {
+    if (req.body?.action) {
+      const patientId = Number(req.params.id);
+      const { categoryId } = req.params;
+      if (!checkPatientAndCategory(res, patientId, categoryId)) return;
+      const { before } = applyAction(patientId, categoryId, req.body);
+      audit(req, req.body.action, {
+        targetType: 'patient',
+        targetId: patientId,
+        details: { category: categoryId, action: req.body.action, allCategories: Boolean(req.body.allCategories) },
+      });
+      return res.json({ ok: true, before, items: itemsForPatient(patientId) });
+    }
     const patientId = Number(req.params.id);
     const { categoryId } = req.params;
 
