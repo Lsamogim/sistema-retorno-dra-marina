@@ -87,8 +87,47 @@ export async function hashPasswordAsync(plainPassword) {
 }
 
 const db = new DatabaseSync(DB_PATH);
-db.exec('PRAGMA journal_mode = WAL;');
+// Diário DELETE (e não WAL): o arquivo principal fica sempre completo, sem depender de
+// arquivos -wal/-shm compartilhados entre o container antigo e o novo durante um deploy.
+db.exec('PRAGMA busy_timeout = 5000;');
+db.exec('PRAGMA journal_mode = DELETE;');
 db.exec('PRAGMA foreign_keys = ON;');
+
+/** Diagnóstico sem dados pessoais: arquivos da pasta de dados e quantidade de registros. */
+function logStartupDiagnostics() {
+  const listDir = (dir) => {
+    try {
+      return fs.readdirSync(dir).map((name) => {
+        const st = fs.statSync(path.join(dir, name));
+        return `${name} (${st.isDirectory() ? 'pasta' : `${st.size} bytes`}, ${st.mtime.toISOString()})`;
+      });
+    } catch (err) {
+      return [`(erro ao listar: ${err.message})`];
+    }
+  };
+  const count = (table) => {
+    try {
+      return db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c;
+    } catch {
+      return 'n/d';
+    }
+  };
+  console.error('[Diagnóstico] DATA_DIR =', DATA_DIR, '| DB_PATH =', DB_PATH);
+  console.error('[Diagnóstico] Arquivos em DATA_DIR:', JSON.stringify(listDir(DATA_DIR)));
+  console.error('[Diagnóstico] Arquivos em backups:', JSON.stringify(listDir(path.join(DATA_DIR, 'backups'))));
+  console.error(
+    '[Diagnóstico] Registros:',
+    JSON.stringify({
+      patients: count('patients'),
+      appointments: count('appointments'),
+      states: count('patient_category_states'),
+      import_logs: count('import_logs'),
+      users: count('users'),
+      audit_log: count('audit_log'),
+      sessions: count('sessions'),
+    })
+  );
+}
 
 export function initDatabase() {
   db.exec(`
@@ -213,7 +252,14 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
   `);
 
-  const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+  let userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+  // Em produção, um banco sem usuárias é inesperado (pode ser o container anterior ainda
+  // liberando o volume). Conferir de novo por alguns segundos antes de concluir.
+  for (let attempt = 0; IS_PRODUCTION && userCount === 0 && attempt < 6; attempt++) {
+    console.warn(`[Auth] Nenhuma usuária encontrada; conferindo de novo (${attempt + 1}/6)...`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+    userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+  }
   if (userCount === 0) {
     const nowIso = new Date().toISOString();
     const legacy = db.prepare('SELECT * FROM app_auth WHERE id = 1').get();
@@ -229,6 +275,7 @@ export function initDatabase() {
       let initialPass = process.env.APP_PASSWORD;
       if (!initialPass) {
         if (IS_PRODUCTION) {
+          logStartupDiagnostics();
           throw new Error(
             '[Auth] APP_PASSWORD não definida. Em produção a senha inicial é obrigatória ' +
               '(defina APP_PASSWORD nas variáveis de ambiente antes de iniciar).'

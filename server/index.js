@@ -576,10 +576,29 @@ setInterval(purgeExpiredSessions, 60 * 60 * 1000).unref();
 startBackupScheduler();
 
 const PORT = Number(process.env.PORT) || 3456;
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   const localUrls = getLocalNetworkUrls(PORT);
   console.log(`Servidor Dra. Marina Retornos rodando em http://localhost:${PORT}`);
   if (localUrls.length) {
     console.log(`Acesso na mesma rede Wi-Fi: ${localUrls.join(' | ')}`);
   }
 });
+
+// Desligamento correto (deploy/reinício no Railway): para de aceitar conexões e fecha o banco,
+// garantindo que tudo foi gravado no arquivo antes de o próximo container abrir o volume.
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[Servidor] ${signal} recebido: encerrando com segurança...`);
+  server.close();
+  try {
+    db.close();
+    console.log('[Servidor] Banco fechado.');
+  } catch (err) {
+    console.error('[Servidor] Erro ao fechar o banco:', err.message);
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
