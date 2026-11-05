@@ -1,0 +1,90 @@
+/* Design tokens — paleta Quantus (spec 2026-11-05, seção 4). Única fonte de cores e medidas. */
+:root {
+  /* Cores de marca e superfícies */
+  --color-ink: #18102b;
+  --color-ink-2: #4b4462;
+  --color-ink-3: #5e5775;
+  --color-ink-on-dark: #ffffff;
+  --color-ink-on-dark-2: #b9b2d3;
+  --color-brand: #834dfb;
+  --color-brand-hover: #7340ec;
+  --color-brand-strong: #4a2bb8;
+  --color-brand-soft: #eeeafe;
+  --color-highlight: #f0e100;
+  --color-canvas: #f5f3ff;
+  --color-surface: #ffffff;
+  --color-surface-muted: #faf9ff;
+  --color-border: #e4dff7;
+  --color-border-control: #8c84a8;
+  --color-overlay: rgba(24, 16, 43, 0.48);
+
+  /* Situação (fg = texto, bg = fundo) */
+  --status-late-fg: #a3201a;
+  --status-late-bg: #fdecec;
+  --status-soon-fg: #8a5300;
+  --status-soon-bg: #fff4d6;
+  --status-waiting-fg: #1d4ed8;
+  --status-waiting-bg: #e8effe;
+  --status-done-fg: #14653a;
+  --status-done-bg: #e9f8ef;
+  --status-done-border: #9ed9b5;
+  --status-out-fg: #4b4462;
+  --status-out-bg: #efedf5;
+
+  /* Espaçamento (base 4) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* Raios */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-full: 999px;
+
+  /* Sombras */
+  --shadow-sm: 0 1px 2px rgba(24, 16, 43, 0.06), 0 1px 3px rgba(24, 16, 43, 0.04);
+  --shadow-md: 0 8px 24px rgba(24, 16, 43, 0.1), 0 2px 6px rgba(24, 16, 43, 0.06);
+  --shadow-overlay: 0 24px 64px rgba(24, 16, 43, 0.22);
+
+  /* Tipografia */
+  --font-sans: 'Plus Jakarta Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --text-caption: 12px;
+  --lh-caption: 16px;
+  --text-meta: 14px;
+  --lh-meta: 20px;
+  --text-body: 15px;
+  --lh-body: 22px;
+  --text-body-lg: 16px;
+  --lh-body-lg: 24px;
+  --text-section: 18px;
+  --lh-section: 26px;
+  --text-title: 22px;
+  --lh-title: 28px;
+  --text-display: 28px;
+  --lh-display: 34px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Controles */
+  --control-h-sm: 36px;
+  --control-h: 44px;
+
+  /* Movimento */
+  --dur-fast: 150ms;
+  --dur-base: 250ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* Layout */
+  --content-max: 1120px;
+  --sheet-width: 440px;
+  --topnav-h: 56px;
+  --bottomnav-h: 64px;
+}
