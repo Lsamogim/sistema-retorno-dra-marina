@@ -56,7 +56,7 @@ beforeEach(() => {
   });
   endpoints.act.mockImplementation(async (patientId, categoryId, body) => {
     const map = { contacted: 'aguardando', archive: 'fora', scheduled: 'agendado' };
-    return { ok: true, before: [{ patient_id: patientId, category_id: categoryId, missing: true }], items: [{ ...karina, stage: map[body.action] }] };
+    return { ok: true, undoToken: 'tok', items: [{ ...karina, stage: map[body.action] }] };
   });
   vi.spyOn(window, 'open').mockImplementation(() => null);
 });

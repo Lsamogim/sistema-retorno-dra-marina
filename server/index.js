@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import db, { INITIAL_REPORT_PATH, REMOTE_URL_PATH, initDatabase } from './db.js';
 import { apiGuard, purgeExpiredSessions, registerAuthRoutes, requireAdmin } from './auth.js';
 import { audit } from './audit.js';
-import { applyAction, restoreStates } from './stateActions.js';
+import { applyAction, copyStatesForMerge, registerUndo, restoreWithToken } from './stateActions.js';
 import { backupStatus, createSanitizedSnapshot, startBackupScheduler, tmpBackupPath } from './backup.js';
 import { importReportBuffer, importReportFile } from './importer.js';
 import { buildTodayData, computeDashboardData, getLocalTodayIso } from './returnEngine.js';
@@ -284,32 +284,7 @@ app.post('/api/patients/:id/merge', (req, res, next) => {
       db.prepare('UPDATE appointments SET patient_id = ? WHERE patient_id = ?').run(targetId, sourceId);
 
       // Migrar estados de categorias que ainda não existam no paciente destino
-      const sourceStates = db
-        .prepare('SELECT * FROM patient_category_states WHERE patient_id = ?')
-        .all(sourceId);
-      const insertTargetState = db.prepare(`
-        INSERT OR IGNORE INTO patient_category_states (
-          patient_id, category_id, contacted_at, contacted_for_cycle_date,
-          review_dismissed_for_date, review_status_override, renewal_done_for_date,
-          archived, archived_reason, archived_at, custom_due_date, custom_interval_days
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const st of sourceStates) {
-        insertTargetState.run(
-          targetId,
-          st.category_id,
-          st.contacted_at,
-          st.contacted_for_cycle_date,
-          st.review_dismissed_for_date,
-          st.review_status_override,
-          st.renewal_done_for_date,
-          st.archived,
-          st.archived_reason,
-          st.archived_at,
-          st.custom_due_date,
-          st.custom_interval_days ?? null
-        );
-      }
+      copyStatesForMerge(sourceId, targetId);
       db.prepare('DELETE FROM patient_category_states WHERE patient_id = ?').run(sourceId);
 
       db.prepare('UPDATE patients SET merged_into_id = ?, updated_at = ? WHERE id = ?').run(
@@ -361,7 +336,7 @@ app.post('/api/patients/:id/categories/:categoryId/restore', (req, res, next) =>
     const patientId = Number(req.params.id);
     const { categoryId } = req.params;
     if (!checkPatientAndCategory(res, patientId, categoryId)) return;
-    restoreStates(patientId, req.body?.before);
+    restoreWithToken(patientId, String(req.body?.undoToken || ''));
     audit(req, 'restore', { targetType: 'patient', targetId: patientId, details: { category: categoryId } });
     res.json({ ok: true, items: itemsForPatient(patientId) });
   } catch (err) {
@@ -381,7 +356,7 @@ app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
         targetId: patientId,
         details: { category: categoryId, action: req.body.action, allCategories: Boolean(req.body.allCategories) },
       });
-      return res.json({ ok: true, before, items: itemsForPatient(patientId) });
+      return res.json({ ok: true, undoToken: registerUndo(patientId, before), items: itemsForPatient(patientId) });
     }
     const patientId = Number(req.params.id);
     const { categoryId } = req.params;

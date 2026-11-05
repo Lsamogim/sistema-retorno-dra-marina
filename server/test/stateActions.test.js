@@ -13,7 +13,7 @@ after(() => {
 process.env.APP_PASSWORD = 'senha-teste-1234';
 const { initDatabase, default: db } = await import('../db.js');
 initDatabase();
-const { applyAction, restoreStates } = await import('../stateActions.js');
+const { applyAction, restoreStates, registerUndo, restoreWithToken, copyStatesForMerge } = await import('../stateActions.js');
 
 const NOW = '2026-11-05T15:00:00.000Z';
 let seq = 0;
@@ -94,9 +94,9 @@ test('archive em todos os procedimentos + restore mantém arquivada a categoria 
   applyAction(pid, 'laser', { action: 'archive', reason: 'Teve alta' }, NOW);
   applyAction(pid, 'botox', { action: 'contacted', cycleKey: 'c1' }, NOW);
   const { before } = applyAction(pid, 'botox', { action: 'archive', reason: 'Não volta mais', allCategories: true }, NOW);
-  const total = db.prepare('SELECT COUNT(*) c FROM categories').get().c;
-  assert.equal(before.length, total);
-  assert.equal(row(pid, 'capilar').archived, 1);
+  // Só os procedimentos que a paciente tem (laser e botox), não todas as categorias da clínica.
+  assert.equal(before.length, 2);
+  assert.equal(row(pid, 'capilar'), undefined);
   restoreStates(pid, before);
   assert.equal(row(pid, 'laser').archived, 1);
   assert.equal(row(pid, 'laser').archived_reason, 'Teve alta');
@@ -124,4 +124,42 @@ test('restore rejeita linhas de outro paciente', () => {
 test('ação desconhecida lança erro 400', () => {
   const pid = newPatient();
   assert.throws(() => applyAction(pid, 'botox', { action: 'explodir' }, NOW), (e) => e.status === 400);
+});
+
+test('restore por código de desfazer volta ao estado anterior', () => {
+  const pid = newPatient();
+  const { before } = applyAction(pid, 'botox', { action: 'scheduled', date: '2026-11-12' }, NOW);
+  const token = registerUndo(pid, before);
+  restoreWithToken(pid, token);
+  assert.equal(row(pid, 'botox'), undefined);
+});
+
+test('código de desfazer é recusado se a linha mudou depois da ação', () => {
+  const pid = newPatient();
+  const { before } = applyAction(pid, 'botox', { action: 'scheduled', date: '2026-11-12' }, NOW);
+  const token = registerUndo(pid, before);
+  db.prepare("UPDATE patient_category_states SET custom_due_date = '2027-01-01' WHERE patient_id = ? AND category_id = 'botox'").run(pid);
+  assert.throws(() => restoreWithToken(pid, token), (e) => e.status === 409);
+  assert.equal(row(pid, 'botox').custom_due_date, '2027-01-01');
+});
+
+test('código de desfazer de outro paciente, desconhecido ou vencido é recusado', () => {
+  const pid = newPatient();
+  const other = newPatient();
+  const { before } = applyAction(pid, 'botox', { action: 'contacted', cycleKey: 'c' }, NOW);
+  const token = registerUndo(pid, before);
+  assert.throws(() => restoreWithToken(other, token), (e) => e.status === 400);
+  assert.throws(() => restoreWithToken(pid, 'nao-existe'), (e) => e.status === 410);
+  const later = Date.now() + 16 * 60 * 1000;
+  assert.throws(() => restoreWithToken(pid, token, later), (e) => e.status === 410);
+});
+
+test('unificar copia todas as colunas do estado, inclusive as novas', () => {
+  const source = newPatient();
+  const target = newPatient();
+  applyAction(source, 'laser', { action: 'archive', reason: 'Pausa', until: '2027-02-01' }, NOW);
+  applyAction(source, 'botox', { action: 'scheduled', date: '2026-11-20' }, NOW);
+  copyStatesForMerge(source, target);
+  assert.equal(row(target, 'laser').archived_until, '2027-02-01');
+  assert.equal(row(target, 'botox').scheduled_for, '2026-11-20');
 });

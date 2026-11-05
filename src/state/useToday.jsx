@@ -100,7 +100,7 @@ export function TodayProvider({ children }) {
         const res = await endpoints.act(item.patientId, item.categoryId, body);
         const updated = res.items.find((i) => keyOf(i) === key);
         const toStage = updated?.stage || PREDICTED_STAGE[body.action] || fromStage;
-        beforesRef.current.set(key, { before: res.before, patientId: item.patientId, categoryId: item.categoryId });
+        beforesRef.current.set(key, { undoToken: res.undoToken, patientId: item.patientId, categoryId: item.categoryId });
         replacePatientItems(item.patientId, res.items, key);
         setMoved((m) => new Map(m).set(key, { fromStage, toStage }));
         setLastMovedStage(`${toStage}:${Date.now()}`);
@@ -129,7 +129,7 @@ export function TodayProvider({ children }) {
       const entry = beforesRef.current.get(key);
       if (!entry) return false;
       try {
-        const res = await endpoints.restore(entry.patientId, entry.categoryId, entry.before);
+        const res = await endpoints.restore(entry.patientId, entry.categoryId, entry.undoToken);
         beforesRef.current.delete(key);
         clearMoved(key);
         replacePatientItems(entry.patientId, res.items, null);

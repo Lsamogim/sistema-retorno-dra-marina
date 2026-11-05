@@ -19,7 +19,7 @@ const todayPayload = {
   categories: [{ id: 'capilar', name: 'Capilar' }],
   items: [karina, beatriz],
 };
-const before = [{ patient_id: 1, category_id: 'capilar', missing: true }];
+const undoToken = 'tok-1';
 
 function Harness() {
   const t = useToday();
@@ -69,7 +69,7 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: false });
   window.history.replaceState(null, '', '/hoje');
   endpoints.getToday.mockResolvedValue(structuredClone(todayPayload));
-  endpoints.act.mockResolvedValue({ ok: true, before, items: [{ ...karina, stage: 'aguardando', stageReason: null }] });
+  endpoints.act.mockResolvedValue({ ok: true, undoToken, items: [{ ...karina, stage: 'aguardando', stageReason: null }] });
   endpoints.restore.mockResolvedValue({ ok: true, items: [karina] });
 });
 afterEach(() => {
@@ -111,11 +111,11 @@ describe('useToday', () => {
     expect(screen.getByRole('status')).toHaveTextContent(NETWORK_ERROR_MESSAGE);
   });
 
-  test('undo chama restore com o before e devolve o item a chamar', async () => {
+  test('undo chama restore com o código de desfazer e devolve o item a chamar', async () => {
     await renderReady();
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'chamar karina' })));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'desfazer karina' })));
-    expect(endpoints.restore).toHaveBeenCalledWith(1, 'capilar', before);
+    expect(endpoints.restore).toHaveBeenCalledWith(1, 'capilar', undoToken);
     await act(async () => vi.advanceTimersByTime(4001));
     expect(screen.getByRole('list', { name: 'chamar' })).toHaveTextContent('Karina Cardoso');
     expect(screen.getByText('contador chamar:2')).toBeInTheDocument();

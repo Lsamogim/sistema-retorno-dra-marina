@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import db from './db.js';
 import { getLocalTodayIso } from './dates.js';
 
@@ -24,9 +25,9 @@ const STATE_COLUMNS = [
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export class ActionError extends Error {
-  constructor(message) {
+  constructor(message, status = 400) {
     super(message);
-    this.status = 400;
+    this.status = status;
     this.expose = true;
   }
 }
@@ -132,8 +133,20 @@ export function applyAction(patientId, categoryId, body, nowIso = new Date().toI
       if (body.until !== undefined && body.until !== null && !isValidIsoDate(body.until)) {
         throw new ActionError('Data de pausa inválida.');
       }
+      // "Todos os procedimentos" = os que esta paciente tem (atendimentos ou estado salvo).
       const categories = body.allCategories
-        ? db.prepare('SELECT id FROM categories').all().map((c) => c.id)
+        ? [
+            ...new Set([
+              categoryId,
+              ...db
+                .prepare(`
+                  SELECT category_id FROM appointments WHERE patient_id = ?
+                  UNION SELECT category_id FROM patient_category_states WHERE patient_id = ?
+                `)
+                .all(patientId, patientId)
+                .map((r) => r.category_id),
+            ]),
+          ]
         : [categoryId];
       const patch = {
         archived: 1,
@@ -177,4 +190,50 @@ export function restoreStates(patientId, before) {
       }
     }
   });
+}
+
+// ---------------------------------------------------------------------------
+// Desfazer com código guardado no servidor: o navegador nunca envia o estado a gravar.
+// O código vale 15 minutos e só funciona se a linha ainda estiver como a ação deixou.
+// ---------------------------------------------------------------------------
+
+const UNDO_TTL_MS = 15 * 60 * 1000;
+const MAX_UNDO_ENTRIES = 2000;
+const undoStore = new Map();
+
+const sameState = (a, b) => STATE_COLUMNS.every((c) => (a?.[c] ?? null) === (b?.[c] ?? null));
+
+export function registerUndo(patientId, before, now = Date.now()) {
+  for (const [token, entry] of undoStore) if (entry.expiresAt <= now) undoStore.delete(token);
+  if (undoStore.size >= MAX_UNDO_ENTRIES) undoStore.delete(undoStore.keys().next().value);
+  const token = crypto.randomBytes(16).toString('base64url');
+  const after = before.map((b) => getRow(patientId, b.category_id) || null);
+  undoStore.set(token, { patientId: Number(patientId), before, after, expiresAt: now + UNDO_TTL_MS });
+  return token;
+}
+
+export function restoreWithToken(patientId, token, now = Date.now()) {
+  const entry = undoStore.get(token);
+  if (!entry || entry.expiresAt <= now) {
+    undoStore.delete(token);
+    throw new ActionError('Não dá mais para desfazer esta ação (o prazo de 15 minutos passou).', 410);
+  }
+  if (entry.patientId !== Number(patientId)) throw new ActionError('Código de desfazer inválido.');
+  const changed = entry.before.some((b, i) => !sameState(getRow(patientId, b.category_id), entry.after[i]));
+  if (changed) {
+    throw new ActionError('Esses dados mudaram depois da ação, então não dá para desfazer. Ajuste pela ficha.', 409);
+  }
+  restoreStates(patientId, entry.before);
+  undoStore.delete(token);
+}
+
+/** Unificação de cadastros: copia todas as colunas de estado da origem para o destino. */
+export function copyStatesForMerge(sourceId, targetId) {
+  const cols = ['patient_id', 'category_id', ...STATE_COLUMNS];
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO patient_category_states (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`
+  );
+  for (const st of db.prepare('SELECT * FROM patient_category_states WHERE patient_id = ?').all(sourceId)) {
+    insert.run(targetId, st.category_id, ...STATE_COLUMNS.map((c) => st[c] ?? null));
+  }
 }
