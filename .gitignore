@@ -5,3 +5,6 @@ data/*.sqlite-shm
 data/*.xlsx
 data/remote-url.txt
 .env
+
+# Configurações pessoais do Claude Code
+.claude/settings.local.json
