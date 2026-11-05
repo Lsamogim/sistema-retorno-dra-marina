@@ -6,7 +6,7 @@ export function StageTabs({ stages, value, onChange, pulseId = null, label = 'Et
 
   useEffect(() => {
     if (!pulseId) return undefined;
-    setPulsing(pulseId);
+    setPulsing(String(pulseId).split(':')[0]);
     const t = setTimeout(() => setPulsing(null), 600);
     return () => clearTimeout(t);
   }, [pulseId]);

@@ -6,6 +6,7 @@ import { LoginPage } from '../features/auth/LoginPage.jsx';
 import { ForcedPasswordPage } from '../features/auth/ForcedPasswordPage.jsx';
 import { BrandMark } from '../features/auth/AuthLayout.jsx';
 import { PAGES } from './pages.jsx';
+import { TodayProvider } from '../state/useToday.jsx';
 import styles from './AppShell.module.css';
 
 const NAV = [
@@ -100,13 +101,15 @@ function Routed() {
   if (user.mustChangePassword) return <ForcedPasswordPage />;
   const Page = PAGES[route] || PAGES.hoje;
   return (
-    <div className={styles.app}>
-      <TopNav />
-      <main className={styles.main}>
-        <Page />
-      </main>
-      <BottomNav />
-    </div>
+    <TodayProvider>
+      <div className={styles.app}>
+        <TopNav />
+        <main className={styles.main}>
+          <Page />
+        </main>
+        <BottomNav />
+      </div>
+    </TodayProvider>
   );
 }
 
