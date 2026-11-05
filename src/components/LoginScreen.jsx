@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Lock, User, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 
 export default function LoginScreen({ onLoginSuccess }) {
-  const [username, setUsername] = useState('dramarina');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -54,7 +54,7 @@ export default function LoginScreen({ onLoginSuccess }) {
                 type="text"
                 autoComplete="username"
                 className="form-input login-input"
-                placeholder="dramarina"
+                placeholder="Seu usuário"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required

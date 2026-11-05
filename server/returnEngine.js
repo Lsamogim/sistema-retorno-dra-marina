@@ -7,12 +7,20 @@ const STOPWORDS = new Set([
   'depilacao', 'laser', 'botox', 'bernardino', 'piraju', 'avare', 'ipaussu',
 ]);
 
-export function getLocalTodayIso() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+// A clínica opera no horário de Brasília. O servidor na nuvem roda em UTC, então
+// "hoje" precisa ser calculado explicitamente no fuso da clínica (senão, após 21h,
+// o sistema já consideraria o dia seguinte).
+const CLINIC_TIMEZONE = process.env.CLINIC_TIMEZONE || 'America/Sao_Paulo';
+const clinicDateFormatter = new Intl.DateTimeFormat('en-CA', {
+  timeZone: CLINIC_TIMEZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+export function getLocalTodayIso(now = new Date()) {
+  // en-CA formata como AAAA-MM-DD
+  return clinicDateFormatter.format(now);
 }
 
 export function addDaysIso(isoDate, days) {

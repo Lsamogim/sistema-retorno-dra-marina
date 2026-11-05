@@ -82,6 +82,8 @@ export default function App() {
     }, onUndo ? 6500 : 4500);
   }, []);
 
+  const dashboardLoadedRef = useRef(false);
+
   const fetchDashboard = useCallback(async () => {
     try {
       const res = await fetch('/api/dashboard', {
@@ -97,13 +99,58 @@ export default function App() {
       if (!res.ok) throw new Error('Não foi possível carregar os dados do servidor local.');
       const data = await res.json();
       setDashboard(data);
+      dashboardLoadedRef.current = true;
       setError(null);
     } catch (err) {
-      setError(err.message);
+      if (dashboardLoadedRef.current) {
+        // Já há dados na tela: avisar sem derrubar a interface (e sem fechar ficha/modal abertos).
+        showToastMessage('Não foi possível atualizar a lista agora. Tente novamente em instantes.');
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showToastMessage]);
+
+  // Envia uma alteração ao servidor. Retorna true se salvou; em caso de falha mostra o
+  // motivo para a usuária e retorna false (quem chamou não deve fechar o formulário).
+  const sendMutation = useCallback(
+    async (url, method, body) => {
+      let res;
+      try {
+        res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          credentials: 'include',
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      } catch {
+        showToastMessage('Sem conexão com o servidor. A alteração NÃO foi salva.');
+        return false;
+      }
+      if (res.status === 401) {
+        showToastMessage('Sua sessão expirou. Entre novamente; a alteração NÃO foi salva.');
+        setAuthUser(null);
+        setDashboard(null);
+        dashboardLoadedRef.current = false;
+        return false;
+      }
+      if (!res.ok) {
+        let message = '';
+        try {
+          const payload = await res.json();
+          message = payload?.error?.message || '';
+        } catch {
+          // resposta sem JSON (ex.: erro do proxy)
+        }
+        showToastMessage(`Não foi possível salvar: ${message || `erro ${res.status}`}`);
+        return false;
+      }
+      return true;
+    },
+    [showToastMessage]
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -162,6 +209,7 @@ export default function App() {
     }
     setAuthUser(null);
     setDashboard(null);
+    dashboardLoadedRef.current = false;
   }, []);
 
   const activeDrawerItem = useMemo(() => {
@@ -185,14 +233,20 @@ export default function App() {
         credentials: 'include',
         body: formData,
       });
-      const payload = await res.json();
+      const payload = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(payload?.error?.message || 'Falha ao importar relatório.');
+        throw new Error(payload?.error?.message || `Falha ao importar relatório (erro ${res.status}).`);
       }
       setDashboard(payload.dashboard);
-      showToastMessage(
-        `Relatório "${payload.summary.filename}" importado: ${payload.summary.validEvents} atendimentos processados.`
-      );
+      const { filename, validEvents, removedAppointments, cleanupSkipped } = payload.summary;
+      let msg = `Relatório "${filename}" importado: ${validEvents} atendimentos processados.`;
+      if (removedAppointments > 0) {
+        msg += ` ${removedAppointments} agendamento(s) que saíram da agenda foram removidos.`;
+      }
+      if (cleanupSkipped > 0) {
+        msg += ` Atenção: ${cleanupSkipped} agendamento(s) do período não estavam na planilha e foram mantidos (parece uma exportação parcial).`;
+      }
+      showToastMessage(msg);
     } catch (err) {
       showToastMessage(`Erro na importação: ${err.message}`);
     } finally {
@@ -202,62 +256,46 @@ export default function App() {
 
   const handleSaveQuickPhone = useCallback(
     async (patientId, phoneManual) => {
-      const res = await fetch(`/api/patients/${patientId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        credentials: 'include',
-        body: JSON.stringify({ phoneManual }),
-      });
-      if (res.ok) {
-        await fetchDashboard();
-        showToastMessage('Telefone salvo no banco local.');
-      }
+      const ok = await sendMutation(`/api/patients/${patientId}`, 'PATCH', { phoneManual });
+      if (!ok) return false;
+      await fetchDashboard();
+      showToastMessage('Telefone salvo.');
+      return true;
     },
-    [fetchDashboard, showToastMessage]
+    [fetchDashboard, sendMutation, showToastMessage]
   );
 
   const handleSavePatientDetails = useCallback(
     async (patientId, body) => {
-      const res = await fetch(`/api/patients/${patientId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        credentials: 'include',
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        await fetchDashboard();
-        showToastMessage('Ficha do paciente atualizada.');
-      }
+      const ok = await sendMutation(`/api/patients/${patientId}`, 'PATCH', body);
+      if (!ok) return false;
+      await fetchDashboard();
+      showToastMessage('Ficha do paciente atualizada.');
+      return true;
     },
-    [fetchDashboard, showToastMessage]
+    [fetchDashboard, sendMutation, showToastMessage]
   );
 
   const handleUpdateCategoryState = useCallback(
     async (patientId, categoryId, body, meta = null) => {
-      const res = await fetch(`/api/patients/${patientId}/categories/${categoryId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        credentials: 'include',
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
+      const ok = await sendMutation(`/api/patients/${patientId}/categories/${categoryId}`, 'PATCH', body);
+      if (ok) {
         await fetchDashboard();
         if (meta && body.archived === true) {
           const shortName = (meta.patientName || 'Paciente').split(' ')[0];
           showToastMessage(
             `${shortName} removido da lista (${body.archivedReason || 'Parou o tratamento'}).`,
             async () => {
-              await fetch(`/api/patients/${patientId}/categories/${categoryId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                credentials: 'include',
-                body: JSON.stringify({
+              setToast(null);
+              const undone = await sendMutation(
+                `/api/patients/${patientId}/categories/${categoryId}`,
+                'PATCH',
+                {
                   archived: false,
                   applyToAllCategories: Boolean(body.applyToAllCategories),
-                }),
-              });
-              await fetchDashboard();
-              setToast(null);
+                }
+              );
+              if (undone) await fetchDashboard();
             }
           );
         } else if (meta && meta.reactivated) {
@@ -270,41 +308,32 @@ export default function App() {
           );
         }
       }
+      return ok;
     },
-    [fetchDashboard, showToastMessage]
+    [fetchDashboard, sendMutation, showToastMessage]
   );
 
   const handleMergePatient = useCallback(
     async (sourceId, targetPatientId) => {
-      const res = await fetch(`/api/patients/${sourceId}/merge`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        credentials: 'include',
-        body: JSON.stringify({ targetPatientId }),
-      });
-      if (res.ok) {
-        await fetchDashboard();
-        showToastMessage('Cadastros unificados com sucesso.');
-      }
+      const ok = await sendMutation(`/api/patients/${sourceId}/merge`, 'POST', { targetPatientId });
+      if (!ok) return false;
+      await fetchDashboard();
+      showToastMessage('Cadastros unificados com sucesso.');
+      return true;
     },
-    [fetchDashboard, showToastMessage]
+    [fetchDashboard, sendMutation, showToastMessage]
   );
 
   const handleSaveSettings = useCallback(
     async (categoriesDraft) => {
-      const res = await fetch('/api/categories', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        credentials: 'include',
-        body: JSON.stringify({ categories: categoriesDraft }),
-      });
-      if (res.ok) {
-        setShowSettings(false);
-        await fetchDashboard();
-        showToastMessage('Prazos e mensagens padrão atualizados.');
-      }
+      const ok = await sendMutation('/api/categories', 'PUT', { categories: categoriesDraft });
+      if (!ok) return false;
+      setShowSettings(false);
+      await fetchDashboard();
+      showToastMessage('Prazos e mensagens padrão atualizados.');
+      return true;
     },
-    [fetchDashboard, showToastMessage]
+    [fetchDashboard, sendMutation, showToastMessage]
   );
 
   const activeCategory = useMemo(() => {

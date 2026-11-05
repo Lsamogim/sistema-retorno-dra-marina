@@ -11,6 +11,20 @@ const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : BUNDLE_DATA_DIR;
 
+export const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const LEGACY_DEFAULT_PASSWORD = 'clinica2026';
+
+// Em hospedagem na nuvem (Railway), sem DATA_DIR o banco fica no disco efêmero
+// do container e é apagado a cada novo deploy.
+if (process.env.RAILWAY_ENVIRONMENT && !process.env.DATA_DIR) {
+  console.error('==========================================================');
+  console.error('[Dados] ALERTA: DATA_DIR não definida no Railway.');
+  console.error('[Dados] O banco está no disco temporário do container e será');
+  console.error('[Dados] PERDIDO no próximo deploy. Monte um Volume (ex.: /data)');
+  console.error('[Dados] e defina DATA_DIR=/data.');
+  console.error('==========================================================');
+}
+
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
@@ -167,13 +181,35 @@ export function initDatabase() {
 
   const existingAuth = db.prepare('SELECT * FROM app_auth WHERE id = 1').get();
   if (!existingAuth) {
-    const defaultUser = process.env.APP_USER || 'dramarina';
-    const defaultPass = process.env.APP_PASSWORD || 'clinica2026';
+    const initialUser = process.env.APP_USER || 'dramarina';
+    let initialPass = process.env.APP_PASSWORD;
+    if (!initialPass) {
+      if (IS_PRODUCTION) {
+        throw new Error(
+          '[Auth] APP_PASSWORD não definida. Em produção a senha inicial é obrigatória ' +
+            '(defina APP_PASSWORD nas variáveis de ambiente antes de iniciar).'
+        );
+      }
+      // Modo local: gera senha aleatória e mostra apenas no console desta máquina.
+      initialPass = crypto.randomBytes(9).toString('base64url');
+      console.warn('==========================================================');
+      console.warn(`[Auth] Primeiro acesso. Usuário: ${initialUser}`);
+      console.warn(`[Auth] Senha inicial gerada: ${initialPass}`);
+      console.warn('[Auth] Troque essa senha em Configurações após entrar.');
+      console.warn('==========================================================');
+    } else if (initialPass.length < 12) {
+      console.warn('[Auth] Aviso: APP_PASSWORD tem menos de 12 caracteres. Use uma senha mais forte.');
+    }
     const secret = crypto.randomBytes(32).toString('hex');
     db.prepare(`
       INSERT INTO app_auth (id, username, password_hash, token_secret, updated_at)
       VALUES (1, ?, ?, ?, ?)
-    `).run(defaultUser, hashPassword(defaultPass), secret, new Date().toISOString());
+    `).run(initialUser, hashPassword(initialPass), secret, new Date().toISOString());
+  } else if (verifyPassword(LEGACY_DEFAULT_PASSWORD, existingAuth.password_hash)) {
+    console.error('==========================================================');
+    console.error('[Auth] ALERTA DE SEGURANÇA: a senha atual ainda é a senha padrão antiga,');
+    console.error('[Auth] que é pública. Troque imediatamente em Configurações.');
+    console.error('==========================================================');
   }
 
   const insertCat = db.prepare(`
@@ -246,8 +282,13 @@ export function initDatabase() {
     );
   }
 
+  // Migrações numeradas: cada uma roda uma única vez por banco (PRAGMA user_version).
+  const schemaVersion = db.prepare('PRAGMA user_version').get().user_version;
+
+  // v1: ajuste dos padrões do Capilar. Antes rodava a cada boot e apagava
+  // as edições feitas pela equipe em Configurações.
   const capilarDefault = DEFAULT_CATEGORIES.find((c) => c.id === 'capilar');
-  if (capilarDefault) {
+  if (schemaVersion < 1 && capilarDefault) {
     db.prepare(`
       UPDATE categories
       SET recurrence_days = ?,
@@ -259,6 +300,9 @@ export function initDatabase() {
       capilarDefault.recurrenceDays,
       capilarDefault.whatsappTemplate
     );
+  }
+  if (schemaVersion < 1) {
+    db.exec('PRAGMA user_version = 1;');
   }
 }
 

@@ -730,8 +730,13 @@ app.get('/api/backup', (_req, res, next) => {
     db.prepare('VACUUM INTO ?').run(tmpBackupPath);
     const tmpDb = new DatabaseSync(tmpBackupPath);
     try {
-      // Remover credenciais e segredo de sessão da cópia de backup exportada
+      // Remover credenciais e segredo de sessão da cópia de backup exportada.
+      // Sem secure_delete + VACUUM, os bytes apagados continuariam nas páginas
+      // livres do arquivo e o hash/segredo poderiam ser recuperados.
+      tmpDb.exec('PRAGMA journal_mode = DELETE;');
+      tmpDb.exec('PRAGMA secure_delete = ON;');
       tmpDb.exec('DELETE FROM app_auth;');
+      tmpDb.exec('VACUUM;');
     } finally {
       tmpDb.close();
     }

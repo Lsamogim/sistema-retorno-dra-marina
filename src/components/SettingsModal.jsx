@@ -24,7 +24,7 @@ export default function SettingsModal({
   const [serverInfo, setServerInfo] = useState({ localUrls: [], remoteUrl: null });
   const [copiedUrl, setCopiedUrl] = useState('');
 
-  const [newUsername, setNewUsername] = useState(currentUsername || 'dramarina');
+  const [newUsername, setNewUsername] = useState(currentUsername || '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [authSaving, setAuthSaving] = useState(false);

@@ -96,8 +96,8 @@ const PatientRow = memo(function PatientRow({
 
   const handleQuickPhoneSubmit = async (e) => {
     e.preventDefault();
-    await onSaveQuickPhone(item.patientId, phoneInput);
-    setEditingPhone(false);
+    const saved = await onSaveQuickPhone(item.patientId, phoneInput);
+    if (saved) setEditingPhone(false); // em caso de erro, manter o número digitado
   };
 
   const handleSelectStopReason = (opt) => {

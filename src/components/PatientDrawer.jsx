@@ -56,15 +56,17 @@ export default function PatientDrawer({
     e.preventDefault();
     setSaving(true);
     try {
-      await onSavePatient(item.patientId, {
+      const saved = await onSavePatient(item.patientId, {
         displayName,
         phoneManual,
         notesManual,
       });
+      if (!saved) return; // erro já exibido; manter a ficha aberta com o que foi digitado
       if ((customDueDate || '') !== (item.customDueDate || '')) {
-        await onUpdateState(item.patientId, item.categoryId, {
+        const dateSaved = await onUpdateState(item.patientId, item.categoryId, {
           customDueDate: customDueDate || null,
         });
+        if (!dateSaved) return;
       }
       onClose();
     } finally {
@@ -88,8 +90,8 @@ export default function PatientDrawer({
       `Unificar "${item.patientName}" dentro de "${target.name}"?\nTodos os agendamentos passados e futuros passarão para "${target.name}".`
     );
     if (!confirmed) return;
-    await onMergePatient(item.patientId, Number(mergeTargetId));
-    onClose();
+    const merged = await onMergePatient(item.patientId, Number(mergeTargetId));
+    if (merged) onClose();
   };
 
   const filteredMergeCandidates = allPatients

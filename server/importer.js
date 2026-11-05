@@ -83,6 +83,9 @@ function pickCol(row, candidates) {
   return null;
 }
 
+// Fração máxima dos agendamentos já existentes no período que uma importação pode remover.
+const MAX_CLEANUP_RATIO = 0.25;
+
 export function importReportFile(filePath, displayFilename) {
   const buffer = fs.readFileSync(filePath);
   return importReportBuffer(buffer, displayFilename || filePath.split(/[\\/]/).pop());
@@ -303,8 +306,14 @@ export function importReportBuffer(buffer, filename = 'relatorio.xlsx') {
       }
     }
 
-    // Se for uma planilha completa de período (>= 50 linhas e janela <= 400 dias), remover agendamentos que saíram da agenda
-    if (rows.length >= 50 && minImportedDate && maxImportedDate && seenHashes.size > 0) {
+    // Se for uma planilha completa de período (>= 50 atendimentos válidos e janela <= 400 dias),
+    // remover agendamentos que saíram da agenda (ex.: cancelados).
+    // Trava de segurança: se a remoção atingir mais de MAX_CLEANUP_RATIO dos agendamentos já
+    // existentes no período, a planilha provavelmente é uma exportação parcial (filtrada por
+    // profissional ou serviço). Nesse caso nada é apagado.
+    let removedAppointments = 0;
+    let cleanupSkipped = 0;
+    if (validEvents >= 50 && minImportedDate && maxImportedDate && seenHashes.size > 0) {
       const windowSpanDays =
         (new Date(`${maxImportedDate}T12:00:00Z`) - new Date(`${minImportedDate}T12:00:00Z`)) /
         86400000;
@@ -312,10 +321,20 @@ export function importReportBuffer(buffer, filename = 'relatorio.xlsx') {
         const existingInWindow = db
           .prepare('SELECT id, dedupe_hash FROM appointments WHERE appointment_date >= ? AND appointment_date <= ?')
           .all(minImportedDate, maxImportedDate);
-        const deleteById = db.prepare('DELETE FROM appointments WHERE id = ?');
-        for (const appt of existingInWindow) {
-          if (!seenHashes.has(appt.dedupe_hash)) {
-            deleteById.run(appt.id);
+        const toDelete = existingInWindow.filter((appt) => !seenHashes.has(appt.dedupe_hash));
+        if (toDelete.length > 0) {
+          if (toDelete.length / existingInWindow.length > MAX_CLEANUP_RATIO) {
+            cleanupSkipped = toDelete.length;
+            console.warn(
+              `[Import] Limpeza ignorada: ${toDelete.length} de ${existingInWindow.length} agendamentos ` +
+                `do período ${minImportedDate}..${maxImportedDate} não estão na planilha (exportação parcial?).`
+            );
+          } else {
+            const deleteById = db.prepare('DELETE FROM appointments WHERE id = ?');
+            for (const appt of toDelete) {
+              deleteById.run(appt.id);
+            }
+            removedAppointments = toDelete.length;
           }
         }
       }
@@ -339,6 +358,8 @@ export function importReportBuffer(buffer, filename = 'relatorio.xlsx') {
       validEvents,
       newPatients,
       unmappedServices: unmappedObj,
+      removedAppointments,
+      cleanupSkipped,
     };
   } catch (err) {
     db.exec('ROLLBACK');
