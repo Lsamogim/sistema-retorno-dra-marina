@@ -17,6 +17,7 @@
   --color-border: #e4dff7;
   --color-border-control: #8c84a8;
   --color-overlay: rgba(24, 16, 43, 0.48);
+  --color-on-dark-hover: rgba(255, 255, 255, 0.12);
 
   /* Situação (fg = texto, bg = fundo) */
   --status-late-fg: #a3201a;
