@@ -92,3 +92,14 @@
 .iconOnly.sm {
   width: var(--control-h-sm);
 }
+
+/* Celular e iPad: todo botão com área de toque de 44px */
+@media (max-width: 1023px) {
+  .sm {
+    min-height: var(--control-h);
+  }
+
+  .iconOnly.sm {
+    width: var(--control-h);
+  }
+}

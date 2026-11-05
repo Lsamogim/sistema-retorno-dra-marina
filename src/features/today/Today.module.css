@@ -119,6 +119,12 @@
   white-space: nowrap;
 }
 
+.nameButton {
+  /* Área de toque de 44px sem alterar o layout visual */
+  padding: 11px 0;
+  margin: -11px 0;
+}
+
 .nameButton:hover {
   color: var(--color-brand-strong);
   text-decoration: underline;
