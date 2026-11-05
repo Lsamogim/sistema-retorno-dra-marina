@@ -597,7 +597,7 @@ app.use((err, req, res, _next) => {
   );
   res.status(statusCode).json({
     error: {
-      code: statusCode === 400 ? 'BAD_REQUEST' : statusCode === 413 ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR',
+      code: { 400: 'BAD_REQUEST', 409: 'CONFLICT', 410: 'GONE', 413: 'PAYLOAD_TOO_LARGE' }[statusCode] || 'INTERNAL_ERROR',
       message,
     },
   });

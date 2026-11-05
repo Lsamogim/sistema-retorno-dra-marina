@@ -216,7 +216,7 @@ export function restoreWithToken(patientId, token, now = Date.now()) {
   const entry = undoStore.get(token);
   if (!entry || entry.expiresAt <= now) {
     undoStore.delete(token);
-    throw new ActionError('Não dá mais para desfazer esta ação (o prazo de 15 minutos passou).', 410);
+    throw new ActionError('Esta ação já foi desfeita ou passou do prazo de 15 minutos para desfazer.', 410);
   }
   if (entry.patientId !== Number(patientId)) throw new ActionError('Código de desfazer inválido.');
   const changed = entry.before.some((b, i) => !sameState(getRow(patientId, b.category_id), entry.after[i]));
