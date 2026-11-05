@@ -2201,3 +2201,87 @@ a:focus-visible {
   color: var(--ink-primary);
   word-break: break-all;
 }
+
+/* ===== Administração: usuárias e auditoria ===== */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.admin-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-line);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-tab.is-active {
+  background: var(--accent-clinical);
+  border-color: var(--accent-clinical);
+  color: #fff;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.admin-table th {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-secondary);
+  background: var(--bg-subtle);
+}
+
+.admin-row-inactive td {
+  color: var(--ink-muted);
+}
+
+.admin-row-warning td {
+  background: var(--status-overdue-bg);
+}
+
+.admin-badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-clinical-soft);
+  color: var(--accent-clinical);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.admin-inline-select {
+  padding: 4px 8px;
+  min-width: 140px;
+}

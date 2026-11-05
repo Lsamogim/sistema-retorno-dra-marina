@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import XLSX from 'xlsx';
+import * as XLSX from 'xlsx';
 import db from './db.js';
 import {
   classifySingleService,

@@ -1,21 +1,13 @@
 import express from 'express';
 import multer from 'multer';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import db, {
-  DB_PATH,
-  INITIAL_REPORT_PATH,
-  REMOTE_URL_PATH,
-  initDatabase,
-  hashPassword,
-  verifyPassword,
-  createSessionToken,
-  verifySessionToken,
-} from './db.js';
+import db, { INITIAL_REPORT_PATH, REMOTE_URL_PATH, initDatabase } from './db.js';
+import { apiGuard, purgeExpiredSessions, registerAuthRoutes, requireAdmin } from './auth.js';
+import { audit } from './audit.js';
+import { createSanitizedSnapshot, startBackupScheduler, tmpBackupPath } from './backup.js';
 import { importReportBuffer, importReportFile } from './importer.js';
 import { computeDashboardData, getLocalTodayIso } from './returnEngine.js';
 
@@ -51,7 +43,11 @@ if ((!existingImports || existingImports.cnt === 0) && fs.existsSync(INITIAL_REP
 
 const app = express();
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
+// Só confiar em X-Forwarded-For atrás de um proxy conhecido (Railway). Localmente o próprio
+// cliente poderia forjar o cabeçalho e burlar o limite de tentativas de login.
+if (process.env.RAILWAY_ENVIRONMENT || process.env.TRUST_PROXY) {
+  app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
+}
 
 // Cabeçalhos de segurança HTTP (CSP, HSTS, Anti-Clickjacking, NoSniff)
 app.use((req, res, next) => {
@@ -85,99 +81,6 @@ const upload = multer({
 
 app.use(express.json({ limit: '512kb' }));
 
-const SESSION_COOKIE_NAME = 'dra_marina_session';
-const SESSION_MAX_AGE_SEC = 60 * 60 * 24 * 14; // 14 dias
-
-// Proteção contra força bruta nas rotas de autenticação (máx. 5 falhas / 15 min por IP)
-const authAttempts = new Map();
-const AUTH_WINDOW_MS = 15 * 60 * 1000;
-const AUTH_MAX_ATTEMPTS = 5;
-
-function authRateLimit(req, res, next) {
-  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-  const now = Date.now();
-  const entry = authAttempts.get(ip);
-
-  if (entry && now < entry.resetAt) {
-    if (entry.count >= AUTH_MAX_ATTEMPTS) {
-      const retryAfterSec = Math.ceil((entry.resetAt - now) / 1000);
-      res.setHeader('Retry-After', String(retryAfterSec));
-      return res.status(429).json({
-        error: {
-          code: 'TOO_MANY_ATTEMPTS',
-          message: `Muitas tentativas de acesso. Aguarde ${retryAfterSec} segundos antes de tentar novamente.`,
-        },
-      });
-    }
-  } else if (entry && now >= entry.resetAt) {
-    authAttempts.delete(ip);
-  }
-  next();
-}
-
-function recordFailedAuth(req) {
-  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-  const now = Date.now();
-  const entry = authAttempts.get(ip);
-  if (!entry || now >= entry.resetAt) {
-    authAttempts.set(ip, { count: 1, resetAt: now + AUTH_WINDOW_MS });
-  } else {
-    entry.count += 1;
-  }
-}
-
-function clearFailedAuth(req) {
-  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
-  authAttempts.delete(ip);
-}
-
-function buildSessionCookie(req, token, maxAgeSec) {
-  const isSecure =
-    req.secure ||
-    req.headers['x-forwarded-proto'] === 'https' ||
-    Boolean(process.env.RAILWAY_PUBLIC_DOMAIN) ||
-    process.env.NODE_ENV === 'production';
-  const secureFlag = isSecure ? '; Secure' : '';
-  return `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSec}; HttpOnly; SameSite=Lax${secureFlag}`;
-}
-
-function parseCookies(cookieHeader) {
-  const out = {};
-  if (!cookieHeader) return out;
-  for (const part of cookieHeader.split(';')) {
-    const idx = part.indexOf('=');
-    if (idx === -1) continue;
-    const k = part.slice(0, idx).trim();
-    const v = part.slice(idx + 1).trim();
-    try {
-      out[k] = decodeURIComponent(v);
-    } catch {
-      out[k] = v;
-    }
-  }
-  return out;
-}
-
-function getAuthenticatedUser(req) {
-  const authRow = db.prepare('SELECT * FROM app_auth WHERE id = 1').get();
-  if (!authRow) return null;
-
-  let token = null;
-  const authHeader = req.headers.authorization || '';
-  if (authHeader.startsWith('Bearer ')) {
-    token = authHeader.slice(7).trim();
-  }
-  if (!token) {
-    const cookies = parseCookies(req.headers.cookie);
-    token = cookies[SESSION_COOKIE_NAME] || null;
-  }
-  const username = verifySessionToken(token, authRow.token_secret);
-  if (!username || username.trim().toLowerCase() !== authRow.username.trim().toLowerCase()) {
-    return null;
-  }
-  return authRow.username;
-}
-
 function getLocalNetworkUrls(port) {
   const nets = os.networkInterfaces();
   const urls = [];
@@ -196,153 +99,9 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', date: getLocalTodayIso() });
 });
 
-app.get('/api/auth/session', (req, res) => {
-  const username = getAuthenticatedUser(req);
-  if (!username) {
-    return res.json({ authenticated: false });
-  }
-  res.json({ authenticated: true, username });
-});
-
-app.post('/api/auth/login', authRateLimit, (req, res) => {
-  const rawUser = String(req.body.username || '').trim().toLowerCase();
-  const rawPass = String(req.body.password || '');
-
-  const authRow = db.prepare('SELECT * FROM app_auth WHERE id = 1').get();
-  if (!authRow) {
-    return res.status(500).json({
-      error: { code: 'AUTH_NOT_INITIALIZED', message: 'Autenticação não inicializada.' },
-    });
-  }
-
-  const expectedUser = authRow.username.trim().toLowerCase();
-  const isPassMatch = verifyPassword(rawPass, authRow.password_hash);
-  const isUserMatch = rawUser === expectedUser;
-
-  if (!isUserMatch || !isPassMatch) {
-    recordFailedAuth(req);
-    return res.status(401).json({
-      error: {
-        code: 'INVALID_CREDENTIALS',
-        message: 'Usuário ou senha incorretos. Verifique e tente novamente.',
-      },
-    });
-  }
-
-  clearFailedAuth(req);
-  const token = createSessionToken(authRow.username, authRow.token_secret);
-  res.setHeader('Set-Cookie', buildSessionCookie(req, token, SESSION_MAX_AGE_SEC));
-
-  res.json({
-    ok: true,
-    username: authRow.username,
-  });
-});
-
-app.post('/api/auth/logout', (req, res) => {
-  const user = getAuthenticatedUser(req);
-  if (user) {
-    // Rotacionar o segredo da sessão ao sair para invalidar tokens emitidos anteriormente
-    const newSecret = crypto.randomBytes(32).toString('hex');
-    db.prepare('UPDATE app_auth SET token_secret = ?, updated_at = ? WHERE id = 1').run(
-      newSecret,
-      new Date().toISOString()
-    );
-  }
-  res.setHeader('Set-Cookie', buildSessionCookie(req, '', 0));
-  res.json({ ok: true });
-});
-
-// Proteção CSRF por validação de Origin e middleware de autenticação para /api/*
-app.use('/api', (req, res, next) => {
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-    const origin = req.headers.origin;
-    const host = req.headers.host;
-    if (origin && host) {
-      try {
-        const originHost = new URL(origin).host;
-        if (originHost !== host) {
-          return res.status(403).json({
-            error: { code: 'CSRF_ORIGIN_MISMATCH', message: 'Origem da requisição não autorizada.' },
-          });
-        }
-      } catch {
-        return res.status(403).json({
-          error: { code: 'CSRF_INVALID_ORIGIN', message: 'Cabeçalho Origin inválido.' },
-        });
-      }
-    }
-  }
-
-  if (
-    req.path === '/health' ||
-    req.path === '/auth/session' ||
-    req.path === '/auth/login' ||
-    req.path === '/auth/logout'
-  ) {
-    return next();
-  }
-  const username = getAuthenticatedUser(req);
-  if (!username) {
-    return res.status(401).json({
-      error: {
-        code: 'UNAUTHORIZED',
-        message: 'Sessão expirada ou não autenticada. Faça login para acessar os dados.',
-      },
-    });
-  }
-  req.authUser = username;
-  next();
-});
-
-app.put('/api/auth/credentials', authRateLimit, (req, res, next) => {
-  try {
-    const currentPassword = String(req.body.currentPassword || '');
-    const newUsername = clampStr(req.body.newUsername, 60);
-    const newPassword = String(req.body.newPassword || '');
-
-    const authRow = db.prepare('SELECT * FROM app_auth WHERE id = 1').get();
-    if (!verifyPassword(currentPassword, authRow.password_hash)) {
-      recordFailedAuth(req);
-      return res.status(400).json({
-        error: {
-          code: 'WRONG_CURRENT_PASSWORD',
-          message: 'A senha atual informada está incorreta.',
-        },
-      });
-    }
-
-    if (newPassword.length > 0 && newPassword.length < 8) {
-      return res.status(400).json({
-        error: {
-          code: 'WEAK_PASSWORD',
-          message: 'A nova senha deve ter pelo menos 8 caracteres.',
-        },
-      });
-    }
-
-    clearFailedAuth(req);
-    const updatedUser = newUsername || authRow.username;
-    const updatedHash = newPassword.length >= 8 ? hashPassword(newPassword) : authRow.password_hash;
-    const newSecret = crypto.randomBytes(32).toString('hex');
-
-    db.prepare(`
-      UPDATE app_auth
-      SET username = ?,
-          password_hash = ?,
-          token_secret = ?,
-          updated_at = ?
-      WHERE id = 1
-    `).run(updatedUser, updatedHash, newSecret, new Date().toISOString());
-
-    const token = createSessionToken(updatedUser, newSecret);
-    res.setHeader('Set-Cookie', buildSessionCookie(req, token, SESSION_MAX_AGE_SEC));
-
-    res.json({ ok: true, username: updatedUser });
-  } catch (err) {
-    next(err);
-  }
-});
+// CSRF + sessão para tudo em /api (rotas públicas: health, session, login, logout)
+app.use('/api', apiGuard);
+registerAuthRoutes(app);
 
 app.get('/api/server-info', (_req, res) => {
   const port = Number(process.env.PORT) || 3456;
@@ -363,6 +122,18 @@ app.get('/api/server-info', (_req, res) => {
   });
 });
 
+// Registrar acesso à lista de pacientes no máximo 1 vez a cada 30 min por sessão
+const lastDashboardAudit = new Map();
+function auditDashboardView(req) {
+  const key = req.authUser?.sessionHash;
+  if (!key) return;
+  const now = Date.now();
+  if (now - (lastDashboardAudit.get(key) || 0) < 30 * 60 * 1000) return;
+  if (lastDashboardAudit.size > 2000) lastDashboardAudit.clear();
+  lastDashboardAudit.set(key, now);
+  audit(req, 'patients_list_viewed');
+}
+
 app.get('/api/dashboard', (req, res, next) => {
   try {
     const refDate =
@@ -370,6 +141,7 @@ app.get('/api/dashboard', (req, res, next) => {
         ? req.query.date
         : undefined;
     const data = computeDashboardData(refDate);
+    auditDashboardView(req);
     res.json(data);
   } catch (err) {
     next(err);
@@ -387,6 +159,15 @@ app.post('/api/imports', upload.single('file'), (req, res, next) => {
       });
     }
     const summary = importReportBuffer(req.file.buffer, req.file.originalname);
+    audit(req, 'report_imported', {
+      details: {
+        filename: String(req.file.originalname || '').slice(0, 120),
+        validEvents: summary.validEvents,
+        newPatients: summary.newPatients,
+        removedAppointments: summary.removedAppointments,
+        cleanupSkipped: summary.cleanupSkipped,
+      },
+    });
     try {
       fs.writeFileSync(INITIAL_REPORT_PATH, req.file.buffer);
     } catch (_ignore) {
@@ -428,6 +209,12 @@ app.patch('/api/patients/:id', (req, res, next) => {
       SET display_name = ?, phone_manual = ?, notes_manual = ?, updated_at = ?
       WHERE id = ?
     `).run(displayName, phoneManual, notesManual, new Date().toISOString(), patientId);
+
+    const changedFields = [];
+    if (displayName !== existing.display_name) changedFields.push('nome');
+    if (phoneManual !== existing.phone_manual) changedFields.push('telefone');
+    if (notesManual !== existing.notes_manual) changedFields.push('anotacao');
+    audit(req, 'patient_updated', { targetType: 'patient', targetId: patientId, details: { fields: changedFields } });
 
     res.json({ ok: true });
   } catch (err) {
@@ -530,6 +317,7 @@ app.post('/api/patients/:id/merge', (req, res, next) => {
       throw innerErr;
     }
 
+    audit(req, 'patients_merged', { targetType: 'patient', targetId: targetId, details: { mergedFrom: sourceId } });
     res.json({ ok: true });
   } catch (err) {
     next(err);
@@ -667,13 +455,18 @@ app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
       }
     }
 
+    audit(req, 'patient_return_updated', {
+      targetType: 'patient',
+      targetId: patientId,
+      details: { category: categoryId, fields: Object.keys(req.body || {}).slice(0, 15) },
+    });
     res.json({ ok: true });
   } catch (err) {
     next(err);
   }
 });
 
-app.put('/api/categories', (req, res, next) => {
+app.put('/api/categories', requireAdmin, (req, res, next) => {
   try {
     const list = Array.isArray(req.body.categories) ? req.body.categories : null;
     if (!list) {
@@ -714,199 +507,30 @@ app.put('/api/categories', (req, res, next) => {
       throw innerErr;
     }
 
+    audit(req, 'categories_updated', { details: { categories: list.map((c) => String(c.id || '')).slice(0, 20) } });
     res.json({ ok: true });
   } catch (err) {
     next(err);
   }
 });
 
-app.get('/api/backup', (_req, res, next) => {
-  const tmpBackupPath = path.join(
-    os.tmpdir(),
-    `clinica-backup-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.sqlite`
-  );
+app.get('/api/backup', requireAdmin, (req, res, next) => {
+  const tmpPath = tmpBackupPath();
   try {
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
-    db.prepare('VACUUM INTO ?').run(tmpBackupPath);
-    const tmpDb = new DatabaseSync(tmpBackupPath);
-    try {
-      // Remover credenciais e segredo de sessão da cópia de backup exportada.
-      // Sem secure_delete + VACUUM, os bytes apagados continuariam nas páginas
-      // livres do arquivo e o hash/segredo poderiam ser recuperados.
-      tmpDb.exec('PRAGMA journal_mode = DELETE;');
-      tmpDb.exec('PRAGMA secure_delete = ON;');
-      tmpDb.exec('DELETE FROM app_auth;');
-      tmpDb.exec('VACUUM;');
-    } finally {
-      tmpDb.close();
-    }
+    createSanitizedSnapshot(tmpPath);
+    audit(req, 'backup_downloaded');
     const filename = `backup-retornos-dra-marina-${getLocalTodayIso()}.sqlite`;
-    res.download(tmpBackupPath, filename, () => {
-      fs.rmSync(tmpBackupPath, { force: true });
+    res.download(tmpPath, filename, () => {
+      fs.rmSync(tmpPath, { force: true });
     });
   } catch (err) {
-    fs.rmSync(tmpBackupPath, { force: true });
+    fs.rmSync(tmpPath, { force: true });
     next(err);
   }
 });
 
-app.get('/api/sync-snapshot', (_req, res, next) => {
-  if (process.env.ALLOW_SYNC_SNAPSHOT !== 'true') {
-    return res.status(403).json({
-      error: { code: 'SYNC_DISABLED', message: 'Endpoint de migração desativado.' },
-    });
-  }
-  try {
-    res.json({
-      categories: db.prepare('SELECT * FROM categories').all(),
-      patients: db.prepare('SELECT * FROM patients').all(),
-      appointments: db.prepare('SELECT * FROM appointments').all(),
-      states: db.prepare('SELECT * FROM patient_category_states').all(),
-      importLogs: db.prepare('SELECT * FROM import_logs').all(),
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-app.post('/api/sync-snapshot', express.json({ limit: '15mb' }), (req, res, next) => {
-  if (process.env.ALLOW_SYNC_SNAPSHOT !== 'true') {
-    return res.status(403).json({
-      error: { code: 'SYNC_DISABLED', message: 'Endpoint de migração desativado.' },
-    });
-  }
-  try {
-    const { categories, patients, appointments, states, importLogs } = req.body || {};
-    if (![categories, patients, appointments, states, importLogs].every(Array.isArray)) {
-      return res.status(400).json({
-        error: { code: 'INVALID_SNAPSHOT', message: 'Formato de snapshot inválido.' },
-      });
-    }
-
-    db.exec('PRAGMA foreign_keys = OFF;');
-    db.exec('BEGIN');
-    try {
-      const upsertCat = db.prepare(`
-        INSERT OR REPLACE INTO categories (
-          id, name, short_name, recurrence_days, review_days,
-          whatsapp_template, review_whatsapp_template, sort_order
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const c of categories) {
-        upsertCat.run(
-          c.id,
-          c.name,
-          c.short_name,
-          c.recurrence_days,
-          c.review_days ?? null,
-          c.whatsapp_template,
-          c.review_whatsapp_template ?? null,
-          c.sort_order
-        );
-      }
-
-      const upsertPat = db.prepare(`
-        INSERT OR REPLACE INTO patients (
-          id, normalized_key, display_name, phone_imported, phone_manual,
-          notes_manual, merged_into_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const p of patients) {
-        upsertPat.run(
-          p.id,
-          p.normalized_key,
-          p.display_name,
-          p.phone_imported ?? null,
-          p.phone_manual ?? null,
-          p.notes_manual ?? null,
-          p.merged_into_id ?? null,
-          p.created_at,
-          p.updated_at
-        );
-      }
-
-      const upsertAppt = db.prepare(`
-        INSERT OR REPLACE INTO appointments (
-          id, dedupe_hash, patient_id, category_id, kind,
-          appointment_date, time_slot, raw_service, full_services_cell,
-          situation, observation, price, professional
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const a of appointments) {
-        upsertAppt.run(
-          a.id,
-          a.dedupe_hash,
-          a.patient_id,
-          a.category_id,
-          a.kind,
-          a.appointment_date,
-          a.time_slot ?? null,
-          a.raw_service,
-          a.full_services_cell ?? null,
-          a.situation ?? null,
-          a.observation ?? null,
-          a.price ?? null,
-          a.professional ?? null
-        );
-      }
-
-      const upsertState = db.prepare(`
-        INSERT OR REPLACE INTO patient_category_states (
-          patient_id, category_id, contacted_at, contacted_for_cycle_date,
-          review_dismissed_for_date, review_status_override, renewal_done_for_date,
-          archived, archived_reason, archived_at, custom_due_date, custom_interval_days
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const s of states) {
-        upsertState.run(
-          s.patient_id,
-          s.category_id,
-          s.contacted_at ?? null,
-          s.contacted_for_cycle_date ?? null,
-          s.review_dismissed_for_date ?? null,
-          s.review_status_override ?? null,
-          s.renewal_done_for_date ?? null,
-          s.archived ?? 0,
-          s.archived_reason ?? null,
-          s.archived_at ?? null,
-          s.custom_due_date ?? null,
-          s.custom_interval_days ?? null
-        );
-      }
-
-      const upsertLog = db.prepare(`
-        INSERT OR REPLACE INTO import_logs (
-          id, filename, imported_at, total_rows, valid_events, new_patients, unmapped_services_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const l of importLogs) {
-        upsertLog.run(
-          l.id,
-          l.filename,
-          l.imported_at,
-          l.total_rows,
-          l.valid_events,
-          l.new_patients,
-          l.unmapped_services_json ?? '{}'
-        );
-      }
-
-      db.exec('COMMIT');
-    } catch (innerErr) {
-      db.exec('ROLLBACK');
-      throw innerErr;
-    } finally {
-      db.exec('PRAGMA foreign_keys = ON;');
-    }
-
-    res.json({
-      ok: true,
-      importedPatients: patients.length,
-      importedAppointments: appointments.length,
-    });
-  } catch (err) {
-    next(err);
-  }
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Rota não encontrada.' } });
 });
 
 // Servir frontend estático compilado em produção local
@@ -918,20 +542,34 @@ if (fs.existsSync(DIST_DIR)) {
   });
 }
 
-app.use((err, _req, res, _next) => {
-  console.error('[API Error]', err);
-  const statusCode = Number(err.status) || 500;
-  const safeMessage =
-    err.expose && err.message
-      ? err.message
-      : 'Erro interno ao processar a solicitação.';
+app.use((err, req, res, _next) => {
+  let statusCode = Number(err.status || err.statusCode) || 500;
+  let message = err.expose && err.message ? err.message : 'Erro interno ao processar a solicitação.';
+  if (err.name === 'MulterError') {
+    statusCode = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    message = err.code === 'LIMIT_FILE_SIZE' ? 'Arquivo grande demais (máximo 8 MB).' : 'Envio de arquivo inválido.';
+  } else if (err.type === 'entity.too.large') {
+    message = 'Dados enviados grandes demais.';
+  } else if (err.type === 'entity.parse.failed') {
+    message = 'Dados enviados em formato inválido.';
+  }
+  // Nunca registrar o corpo da requisição (pode conter senha ou dados de pacientes).
+  console.error(
+    `[API Error] ${req.method} ${req.path} -> ${statusCode} ${err.name || 'Error'}: ${err.type || err.code || ''} ${
+      statusCode >= 500 ? err.stack || err.message : err.message
+    }`
+  );
   res.status(statusCode).json({
     error: {
-      code: statusCode === 400 ? 'BAD_REQUEST' : 'INTERNAL_ERROR',
-      message: safeMessage,
+      code: statusCode === 400 ? 'BAD_REQUEST' : statusCode === 413 ? 'PAYLOAD_TOO_LARGE' : 'INTERNAL_ERROR',
+      message,
     },
   });
 });
+
+purgeExpiredSessions();
+setInterval(purgeExpiredSessions, 60 * 60 * 1000).unref();
+startBackupScheduler();
 
 const PORT = Number(process.env.PORT) || 3456;
 app.listen(PORT, '0.0.0.0', () => {

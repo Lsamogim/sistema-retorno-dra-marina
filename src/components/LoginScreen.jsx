@@ -25,7 +25,7 @@ export default function LoginScreen({ onLoginSuccess }) {
         return;
       }
       localStorage.removeItem('dra_marina_auth_token');
-      onLoginSuccess({ username: json.username });
+      onLoginSuccess({ username: json.username, user: json.user });
     } catch {
       setErrorMsg('Não foi possível conectar ao servidor. Verifique se o notebook está ligado.');
     } finally {

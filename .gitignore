@@ -8,3 +8,4 @@ data/remote-url.txt
 
 # Configurações pessoais do Claude Code
 .claude/settings.local.json
+data/backups/

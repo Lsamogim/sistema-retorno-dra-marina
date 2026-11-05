@@ -13,11 +13,14 @@ import {
   Scale,
   Dna,
   LogOut,
+  Users,
 } from 'lucide-react';
 import PatientRow from './components/PatientRow.jsx';
 import SettingsModal from './components/SettingsModal.jsx';
 import PatientDrawer from './components/PatientDrawer.jsx';
 import LoginScreen from './components/LoginScreen.jsx';
+import ChangePasswordScreen from './components/ChangePasswordScreen.jsx';
+import AdminModal from './components/AdminModal.jsx';
 
 function getAuthHeaders() {
   return {};
@@ -53,6 +56,9 @@ function formatMonthsLabel(days) {
 export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [authUser, setAuthUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const isAdmin = currentUser?.role === 'admin';
 
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -132,6 +138,7 @@ export default function App() {
       if (res.status === 401) {
         showToastMessage('Sua sessão expirou. Entre novamente; a alteração NÃO foi salva.');
         setAuthUser(null);
+        setCurrentUser(null);
         setDashboard(null);
         dashboardLoadedRef.current = false;
         return false;
@@ -168,8 +175,13 @@ export default function App() {
         if (!mounted) return;
         if (session?.authenticated) {
           setAuthUser(session.username);
+          setCurrentUser(session.user || null);
           setAuthChecked(true);
-          fetchDashboard();
+          if (session.user?.mustChangePassword) {
+            setLoading(false);
+          } else {
+            fetchDashboard();
+          }
         } else {
           setAuthUser(null);
           setAuthChecked(true);
@@ -188,13 +200,24 @@ export default function App() {
   }, [fetchDashboard]);
 
   const handleLoginSuccess = useCallback(
-    ({ username }) => {
+    ({ username, user }) => {
       setAuthUser(username);
+      setCurrentUser(user || null);
+      if (user?.mustChangePassword) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       fetchDashboard();
     },
     [fetchDashboard]
   );
+
+  const handleForcedPasswordChanged = useCallback(() => {
+    setCurrentUser((u) => (u ? { ...u, mustChangePassword: false } : u));
+    setLoading(true);
+    fetchDashboard();
+  }, [fetchDashboard]);
 
   const handleLogout = useCallback(async () => {
     await fetch('/api/auth/logout', {
@@ -208,6 +231,8 @@ export default function App() {
       // ignore
     }
     setAuthUser(null);
+    setCurrentUser(null);
+    setShowAdmin(false);
     setDashboard(null);
     dashboardLoadedRef.current = false;
   }, []);
@@ -440,6 +465,16 @@ export default function App() {
     return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
   }
 
+  if (currentUser?.mustChangePassword) {
+    return (
+      <ChangePasswordScreen
+        user={currentUser}
+        onDone={handleForcedPasswordChanged}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   if (error || !dashboard || !activeCategory) {
     return (
       <div style={{ padding: 48, textAlign: 'center' }}>
@@ -471,14 +506,27 @@ export default function App() {
               </p>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <a
-                href="/api/backup"
-                className="mobile-backup-btn"
-                title="Baixar cópia de segurança do banco local"
-                aria-label="Baixar backup"
-              >
-                <Download size={15} />
-              </a>
+              {isAdmin && (
+                <>
+                  <button
+                    type="button"
+                    className="mobile-backup-btn"
+                    onClick={() => setShowAdmin(true)}
+                    title="Usuárias e auditoria"
+                    aria-label="Usuárias e auditoria"
+                  >
+                    <Users size={15} />
+                  </button>
+                  <a
+                    href="/api/backup"
+                    className="mobile-backup-btn"
+                    title="Baixar cópia de segurança do banco"
+                    aria-label="Baixar backup"
+                  >
+                    <Download size={15} />
+                  </a>
+                </>
+              )}
               <button
                 type="button"
                 className="mobile-backup-btn"
@@ -562,18 +610,30 @@ export default function App() {
             )}
           </div>
           <div className="rail-footer-actions">
-            <a
-              href="/api/backup"
-              className="btn-rail-secondary"
-              title="Baixar cópia de segurança do banco local"
-            >
-              <Download size={13} /> Backup local
-            </a>
+            {isAdmin && (
+              <a
+                href="/api/backup"
+                className="btn-rail-secondary"
+                title="Baixar cópia de segurança do banco"
+              >
+                <Download size={13} /> Backup
+              </a>
+            )}
+            {isAdmin && (
+              <button
+                type="button"
+                className="btn-rail-secondary"
+                onClick={() => setShowAdmin(true)}
+                title="Usuárias e auditoria"
+              >
+                <Users size={13} /> Usuárias
+              </button>
+            )}
             <button
               type="button"
               className="btn-rail-secondary"
               onClick={handleLogout}
-              title={`Sair (${authUser})`}
+              title={`Sair (${currentUser?.displayName || authUser})`}
             >
               <LogOut size={13} /> Sair
             </button>
@@ -882,14 +942,14 @@ export default function App() {
         <SettingsModal
           categories={dashboard.categories}
           currentUsername={authUser}
-          authHeaders={getAuthHeaders}
-          onCredentialsUpdated={(newUser) => {
-            setAuthUser(newUser);
-            showToastMessage('Usuário e senha atualizados com sucesso.');
-          }}
+          isAdmin={isAdmin}
           onClose={() => setShowSettings(false)}
           onSave={handleSaveSettings}
         />
+      )}
+
+      {showAdmin && isAdmin && (
+        <AdminModal currentUser={currentUser} onClose={() => setShowAdmin(false)} />
       )}
 
       {activeDrawerItem && (

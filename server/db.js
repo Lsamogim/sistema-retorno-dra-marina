@@ -7,7 +7,7 @@ import { DEFAULT_CATEGORIES } from './classifier.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUNDLE_DATA_DIR = path.resolve(__dirname, '..', 'data');
-const DATA_DIR = process.env.DATA_DIR
+export const DATA_DIR = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : BUNDLE_DATA_DIR;
 
@@ -65,32 +65,25 @@ export function verifyPassword(plainPassword, storedHash) {
   return crypto.timingSafeEqual(derived, keyBuf);
 }
 
-export function createSessionToken(username, secret) {
-  const payload = Buffer.from(
-    JSON.stringify({
-      u: username,
-      exp: Date.now() + 1000 * 60 * 60 * 24 * 14, // 14 dias
-    })
-  ).toString('base64url');
-  const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
-  return `${payload}.${sig}`;
+const scryptAsync = (password, salt, keylen) =>
+  new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, keylen, (err, key) => (err ? reject(err) : resolve(key)));
+  });
+
+/** Versão assíncrona (não bloqueia o servidor durante o login). */
+export async function verifyPasswordAsync(plainPassword, storedHash) {
+  if (!storedHash || !storedHash.includes(':')) return false;
+  const [salt, keyHex] = storedHash.split(':');
+  const derived = await scryptAsync(String(plainPassword), salt, 64);
+  const keyBuf = Buffer.from(keyHex, 'hex');
+  if (derived.length !== keyBuf.length) return false;
+  return crypto.timingSafeEqual(derived, keyBuf);
 }
 
-export function verifySessionToken(token, secret) {
-  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
-  const [payload, sig] = token.split('.');
-  if (!payload || !sig) return null;
-  const expectedSig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expectedSig);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-  try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (!data.exp || Date.now() > data.exp) return null;
-    return data.u || null;
-  } catch {
-    return null;
-  }
+export async function hashPasswordAsync(plainPassword) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = await scryptAsync(String(plainPassword), salt, 64);
+  return `${salt}:${derived.toString('hex')}`;
 }
 
 const db = new DatabaseSync(DB_PATH);
@@ -179,36 +172,96 @@ export function initDatabase() {
     );
   `);
 
-  const existingAuth = db.prepare('SELECT * FROM app_auth WHERE id = 1').get();
-  if (!existingAuth) {
-    const initialUser = process.env.APP_USER || 'dramarina';
-    let initialPass = process.env.APP_PASSWORD;
-    if (!initialPass) {
-      if (IS_PRODUCTION) {
-        throw new Error(
-          '[Auth] APP_PASSWORD não definida. Em produção a senha inicial é obrigatória ' +
-            '(defina APP_PASSWORD nas variáveis de ambiente antes de iniciar).'
-        );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      display_name TEXT,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('admin', 'recepcao')),
+      active INTEGER NOT NULL DEFAULT 1,
+      must_change_password INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_login_at TEXT
+    );
+
+    -- Sessões no servidor: o cookie guarda um token aleatório; aqui fica só o hash dele.
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      ip TEXT,
+      user_agent TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+    -- Trilha de auditoria (LGPD art. 37): quem fez o quê e quando. Sem conteúdo clínico.
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      at TEXT NOT NULL,
+      user_id INTEGER,
+      username TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT,
+      target_id TEXT,
+      details_json TEXT,
+      ip TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
+  `);
+
+  const userCount = db.prepare('SELECT COUNT(*) AS c FROM users').get().c;
+  if (userCount === 0) {
+    const nowIso = new Date().toISOString();
+    const legacy = db.prepare('SELECT * FROM app_auth WHERE id = 1').get();
+    if (legacy) {
+      // Migração: a conta única antiga vira a primeira administradora (mesma senha).
+      db.prepare(`
+        INSERT INTO users (username, display_name, password_hash, role, created_at, updated_at)
+        VALUES (?, ?, ?, 'admin', ?, ?)
+      `).run(legacy.username, legacy.username, legacy.password_hash, nowIso, nowIso);
+      console.log(`[Auth] Conta "${legacy.username}" migrada para o novo sistema de usuários (administradora).`);
+    } else {
+      const initialUser = process.env.APP_USER || 'dramarina';
+      let initialPass = process.env.APP_PASSWORD;
+      if (!initialPass) {
+        if (IS_PRODUCTION) {
+          throw new Error(
+            '[Auth] APP_PASSWORD não definida. Em produção a senha inicial é obrigatória ' +
+              '(defina APP_PASSWORD nas variáveis de ambiente antes de iniciar).'
+          );
+        }
+        // Modo local: gera senha aleatória e mostra apenas no console desta máquina.
+        initialPass = crypto.randomBytes(9).toString('base64url');
+        console.warn('==========================================================');
+        console.warn(`[Auth] Primeiro acesso. Usuário: ${initialUser}`);
+        console.warn(`[Auth] Senha inicial gerada: ${initialPass}`);
+        console.warn('[Auth] Troque essa senha em Configurações após entrar.');
+        console.warn('==========================================================');
+      } else if (initialPass.length < 12) {
+        console.warn('[Auth] Aviso: APP_PASSWORD tem menos de 12 caracteres. Use uma senha mais forte.');
       }
-      // Modo local: gera senha aleatória e mostra apenas no console desta máquina.
-      initialPass = crypto.randomBytes(9).toString('base64url');
-      console.warn('==========================================================');
-      console.warn(`[Auth] Primeiro acesso. Usuário: ${initialUser}`);
-      console.warn(`[Auth] Senha inicial gerada: ${initialPass}`);
-      console.warn('[Auth] Troque essa senha em Configurações após entrar.');
-      console.warn('==========================================================');
-    } else if (initialPass.length < 12) {
-      console.warn('[Auth] Aviso: APP_PASSWORD tem menos de 12 caracteres. Use uma senha mais forte.');
+      db.prepare(`
+        INSERT INTO users (username, display_name, password_hash, role, created_at, updated_at)
+        VALUES (?, ?, ?, 'admin', ?, ?)
+      `).run(initialUser, initialUser, hashPassword(initialPass), nowIso, nowIso);
     }
-    const secret = crypto.randomBytes(32).toString('hex');
-    db.prepare(`
-      INSERT INTO app_auth (id, username, password_hash, token_secret, updated_at)
-      VALUES (1, ?, ?, ?, ?)
-    `).run(initialUser, hashPassword(initialPass), secret, new Date().toISOString());
-  } else if (verifyPassword(LEGACY_DEFAULT_PASSWORD, existingAuth.password_hash)) {
+  }
+  // O segredo de sessão antigo não é mais usado: apagar para não ficar no banco.
+  db.exec('DELETE FROM app_auth;');
+
+  const legacyPasswordUsers = db
+    .prepare('SELECT username, password_hash FROM users WHERE active = 1')
+    .all()
+    .filter((u) => verifyPassword(LEGACY_DEFAULT_PASSWORD, u.password_hash))
+    .map((u) => u.username);
+  if (legacyPasswordUsers.length) {
     console.error('==========================================================');
     console.error('[Auth] ALERTA DE SEGURANÇA: a senha atual ainda é a senha padrão antiga,');
-    console.error('[Auth] que é pública. Troque imediatamente em Configurações.');
+    console.error(`[Auth] que é pública (usuário: ${legacyPasswordUsers.join(', ')}). Troque imediatamente.`);
     console.error('==========================================================');
   }
 

@@ -9,3 +9,6 @@ data/remote-url.txt
 .env
 .env.*
 *.log
+data/backups
+.claude
+.agents

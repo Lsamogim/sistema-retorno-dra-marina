@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { X, Save, Lock, Globe, Copy, Check } from 'lucide-react';
+import PasswordChangeForm from './PasswordChangeForm.jsx';
 
 export default function SettingsModal({
   categories,
   currentUsername,
+  isAdmin,
   onClose,
   onSave,
-  onCredentialsUpdated,
-  authHeaders,
 }) {
   const [draft, setDraft] = useState(() =>
     categories.map((c) => ({
@@ -24,72 +24,19 @@ export default function SettingsModal({
   const [serverInfo, setServerInfo] = useState({ localUrls: [], remoteUrl: null });
   const [copiedUrl, setCopiedUrl] = useState('');
 
-  const [newUsername, setNewUsername] = useState(currentUsername || '');
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [authSaving, setAuthSaving] = useState(false);
-  const [authMsg, setAuthMsg] = useState(null);
-
   useEffect(() => {
-    fetch('/api/server-info', {
-      headers: authHeaders ? authHeaders() : {},
-      credentials: 'include',
-    })
+    fetch('/api/server-info', { credentials: 'include' })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data) setServerInfo(data);
       })
       .catch(() => {});
-  }, [authHeaders]);
+  }, []);
 
   const handleCopyUrl = (url) => {
     navigator.clipboard?.writeText(url);
     setCopiedUrl(url);
     setTimeout(() => setCopiedUrl(''), 2500);
-  };
-
-  const handleSaveCredentials = async () => {
-    if (!currentPassword) {
-      setAuthMsg({ type: 'error', text: 'Digite a senha atual para confirmar a alteração.' });
-      return;
-    }
-    setAuthSaving(true);
-    setAuthMsg(null);
-    try {
-      const res = await fetch('/api/auth/credentials', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authHeaders ? authHeaders() : {}),
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          currentPassword,
-          newUsername,
-          newPassword,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setAuthMsg({ type: 'error', text: json.error?.message || 'Erro ao atualizar senha.' });
-        return;
-      }
-      localStorage.removeItem('dra_marina_auth_token');
-      setCurrentPassword('');
-      setNewPassword('');
-      setAuthMsg({ type: 'ok', text: 'Usuário e senha atualizados com sucesso!' });
-      if (onCredentialsUpdated) {
-        onCredentialsUpdated(json.username);
-      }
-    } catch {
-      setAuthMsg({ type: 'error', text: 'Erro de conexão ao salvar credenciais.' });
-    } finally {
-      setAuthSaving(false);
-    }
-  };
-
-  const handleField = (id, field, value) => {
-    setDraft((prev) => prev.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
   };
 
   const handleSubmit = async (e) => {
@@ -188,71 +135,17 @@ export default function SettingsModal({
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
                   <Lock size={15} style={{ color: 'var(--accent-clinical)' }} />
-                  <strong style={{ fontSize: '13.5px' }}>Alterar Usuário e Senha de Login</strong>
+                  <strong style={{ fontSize: '13.5px' }}>Trocar minha senha ({currentUsername})</strong>
                 </div>
-
-                <div className="settings-cat-grid" style={{ marginBottom: 8 }}>
-                  <div className="form-field" style={{ marginBottom: 0 }}>
-                    <label htmlFor="auth-user">Usuário</label>
-                    <input
-                      id="auth-user"
-                      type="text"
-                      className="form-input"
-                      value={newUsername}
-                      onChange={(e) => setNewUsername(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-field" style={{ marginBottom: 0 }}>
-                    <label htmlFor="auth-cur-pass">Senha atual (obrigatória p/ mudar)</label>
-                    <input
-                      id="auth-cur-pass"
-                      type="password"
-                      className="form-input"
-                      placeholder="Senha atual"
-                      value={currentPassword}
-                      onChange={(e) => setCurrentPassword(e.target.value)}
-                    />
-                  </div>
-                  <div className="form-field" style={{ marginBottom: 0 }}>
-                    <label htmlFor="auth-new-pass">Nova senha</label>
-                    <input
-                      id="auth-new-pass"
-                      type="password"
-                      className="form-input"
-                      placeholder="Nova senha (mín. 8 caracteres)"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className="btn btn-outline"
-                    disabled={authSaving}
-                    onClick={handleSaveCredentials}
-                  >
-                    <Lock size={14} />
-                    {authSaving ? 'Atualizando...' : 'Atualizar login/senha'}
-                  </button>
-                  {authMsg && (
-                    <span
-                      style={{
-                        fontSize: '12.5px',
-                        fontWeight: 600,
-                        color:
-                          authMsg.type === 'ok'
-                            ? 'var(--status-ok-ink)'
-                            : 'var(--status-overdue-ink)',
-                      }}
-                    >
-                      {authMsg.text}
-                    </span>
-                  )}
-                </div>
+                <PasswordChangeForm username={currentUsername} />
               </div>
             </div>
+
+            {!isAdmin && (
+              <div className="settings-cat-card" style={{ fontSize: '13px', color: 'var(--ink-secondary)' }}>
+                Os prazos de retorno e as mensagens padrão só podem ser alterados por uma administradora.
+              </div>
+            )}
 
             {draft.map((cat) => (
               <div key={cat.id} className="settings-cat-card">
@@ -280,6 +173,7 @@ export default function SettingsModal({
                       className="form-input tabular"
                       value={cat.reviewDays}
                       onChange={(e) => handleField(cat.id, 'reviewDays', e.target.value)}
+                      disabled={!isAdmin}
                     />
                   </div>
                   <div className="form-field" style={{ marginBottom: 0 }}>
@@ -294,6 +188,7 @@ export default function SettingsModal({
                       className="form-input tabular"
                       value={cat.recurrenceDays}
                       onChange={(e) => handleField(cat.id, 'recurrenceDays', e.target.value)}
+                      disabled={!isAdmin}
                       required
                     />
                   </div>
@@ -310,6 +205,7 @@ export default function SettingsModal({
                       rows={2}
                       value={cat.reviewWhatsappTemplate}
                       onChange={(e) => handleField(cat.id, 'reviewWhatsappTemplate', e.target.value)}
+                      disabled={!isAdmin}
                     />
                   </div>
                 )}
@@ -328,6 +224,7 @@ export default function SettingsModal({
                     rows={2}
                     value={cat.whatsappTemplate}
                     onChange={(e) => handleField(cat.id, 'whatsappTemplate', e.target.value)}
+                    disabled={!isAdmin}
                   />
                 </div>
               </div>
@@ -336,12 +233,14 @@ export default function SettingsModal({
 
           <div className="panel-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>
-              Cancelar
+              {isAdmin ? 'Cancelar' : 'Fechar'}
             </button>
-            <button type="submit" className="btn btn-clinical" disabled={saving}>
-              <Save size={15} />
-              {saving ? 'Salvando...' : 'Salvar configurações'}
-            </button>
+            {isAdmin && (
+              <button type="submit" className="btn btn-clinical" disabled={saving}>
+                <Save size={15} />
+                {saving ? 'Salvando...' : 'Salvar configurações'}
+              </button>
+            )}
           </div>
         </form>
       </div>
