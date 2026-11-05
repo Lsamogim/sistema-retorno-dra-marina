@@ -1,6 +1,7 @@
 // Mapa rota → página.
 import { TodayPage } from '../features/today/TodayPage.jsx';
 import { PatientSheet } from '../features/patient-sheet/PatientSheet.jsx';
+import { PatientsPage } from '../features/patients/PatientsPage.jsx';
 import { useRoute } from './router.jsx';
 
 function Placeholder({ title }) {
@@ -22,7 +23,7 @@ function PatientRoute() {
 
 export const PAGES = {
   hoje: TodayPage,
-  pacientes: () => <Placeholder title="Pacientes" />,
+  pacientes: PatientsPage,
   paciente: PatientRoute,
   importar: () => <Placeholder title="Importar agenda" />,
   configuracoes: () => <Placeholder title="Configurações" />,
