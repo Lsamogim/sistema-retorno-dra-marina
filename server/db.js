@@ -404,6 +404,27 @@ export function initDatabase() {
   if (schemaVersion < 1) {
     db.exec('PRAGMA user_version = 1;');
   }
+
+  // v2: campos do fluxo por etapas (agendamento manual, conclusão, tentativas, pausa, falta)
+  if (schemaVersion < 2) {
+    const stateCols = db
+      .prepare("PRAGMA table_info('patient_category_states')")
+      .all()
+      .map((c) => c.name);
+    const v2Columns = {
+      scheduled_for: 'TEXT',
+      done_at: 'TEXT',
+      contact_attempts: 'INTEGER NOT NULL DEFAULT 0',
+      archived_until: 'TEXT',
+      no_show_at: 'TEXT',
+    };
+    for (const [name, type] of Object.entries(v2Columns)) {
+      if (!stateCols.includes(name)) {
+        db.exec(`ALTER TABLE patient_category_states ADD COLUMN ${name} ${type};`);
+      }
+    }
+    db.exec('PRAGMA user_version = 2;');
+  }
 }
 
 export default db;
