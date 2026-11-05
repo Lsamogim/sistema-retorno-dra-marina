@@ -121,7 +121,7 @@ export function TodayPage() {
             id="today-search"
             type="search"
             className={styles.searchInput}
-            placeholder="Buscar paciente por nome ou telefone"
+            placeholder="Buscar nome ou telefone"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
