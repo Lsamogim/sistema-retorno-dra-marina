@@ -1,7 +1,8 @@
+import { Ellipsis } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import styles from './Menu.module.css';
 
-export function Menu({ label, items, icon = '⋯' }) {
+export function Menu({ label, items, icon = <Ellipsis size={20} /> }) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const triggerRef = useRef(null);

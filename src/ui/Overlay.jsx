@@ -1,3 +1,4 @@
+import { X } from 'lucide-react';
 import { useEffect, useId, useRef } from 'react';
 import { Button, IconButton } from './Button.jsx';
 import styles from './Overlay.module.css';
@@ -73,7 +74,7 @@ export function Sheet({ open, title, subtitle, onClose, children, footer }) {
             </h2>
             {subtitle && <p className={styles.sheetSubtitle}>{subtitle}</p>}
           </div>
-          <IconButton label="Fechar" icon="✕" onClick={onClose} />
+          <IconButton label="Fechar" icon={<X size={20} />} onClick={onClose} />
         </header>
         <div className={styles.sheetBody}>{children}</div>
         {footer && <footer className={styles.sheetFooter}>{footer}</footer>}

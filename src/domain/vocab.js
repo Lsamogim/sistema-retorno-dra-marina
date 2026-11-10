@@ -32,7 +32,7 @@ export function ruleText(item) {
 
 export function reasonText(item) {
   if (item.stageReason === 'segunda_tentativa') return `${item.attempt}ª tentativa`;
-  if (item.stageReason === 'faltou') return 'Faltou — remarcar';
+  if (item.stageReason === 'faltou') return 'Faltou, remarcar';
   if (item.stageReason === 'faltou_talvez') return `Faltou? Estava agendado para ${formatShortDate(item.scheduledFor).slice(0, 5)}`;
   return '';
 }

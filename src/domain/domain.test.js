@@ -50,7 +50,7 @@ describe('reasonText', () => {
   test('tentativas e falta', () => {
     expect(reasonText({ stageReason: 'segunda_tentativa', attempt: 2 })).toBe('2ª tentativa');
     expect(reasonText({ stageReason: 'segunda_tentativa', attempt: 3 })).toBe('3ª tentativa');
-    expect(reasonText({ stageReason: 'faltou' })).toBe('Faltou — remarcar');
+    expect(reasonText({ stageReason: 'faltou' })).toBe('Faltou, remarcar');
     expect(reasonText({ stageReason: 'atrasado' })).toBe('');
     expect(reasonText({ stageReason: 'faltou_talvez', scheduledFor: '2026-11-04' })).toBe('Faltou? Estava agendado para 04/11');
   });

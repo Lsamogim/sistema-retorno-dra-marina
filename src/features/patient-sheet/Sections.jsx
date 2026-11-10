@@ -63,7 +63,7 @@ export function StageActions({ item, moved, canUndo, handlers, onAddPhone }) {
       </Button>,
       item.whatsappNumber && (
         <Button key="w" variant="secondary" onClick={() => handlers.whatsapp(item)}>
-          Mandar de novo
+          Enviar de novo
         </Button>
       ),
       <Button key="a" variant="ghost" onClick={() => handlers.archive(item)}>
@@ -136,7 +136,7 @@ export function ProcedureSection({ item, onSaveState, onUnarchive }) {
       {item.stage === 'fora' ? (
         <div className={styles.outBox}>
           <p>
-            Fora da lista{item.archivedReason ? ` — ${item.archivedReason}` : ''}
+            Fora da lista{item.archivedReason ? `: ${item.archivedReason}` : ''}
             {item.archivedUntil ? ` (volta em ${formatShortDate(item.archivedUntil)})` : ''}
           </p>
           <Button size="sm" variant="secondary" onClick={() => onUnarchive(item)}>
@@ -183,7 +183,7 @@ export function HistorySection({ item }) {
               {ev.time_slot ? ` · ${ev.time_slot}` : ''}
             </span>
             <span>
-              {KIND_LABELS[ev.kind] || 'Atendimento'} — {ev.raw_service}
+              {KIND_LABELS[ev.kind] || 'Atendimento'}: {ev.raw_service}
             </span>
             {ev.situation && <span className={styles.historySituation}>{ev.situation}</span>}
           </li>

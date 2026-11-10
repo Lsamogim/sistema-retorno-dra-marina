@@ -369,7 +369,7 @@ app.patch('/api/patients/:id/categories/:categoryId', (req, res, next) => {
     const catExists = db.prepare('SELECT 1 FROM categories WHERE id = ?').get(categoryId);
     if (!patExists || !catExists) {
       return res.status(404).json({
-        error: { code: 'NOT_FOUND', message: 'Paciente ou categoria não encontrados.' },
+        error: { code: 'NOT_FOUND', message: 'Paciente ou procedimento não encontrado.' },
       });
     }
 

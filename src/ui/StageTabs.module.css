@@ -41,6 +41,7 @@
   line-height: var(--lh-caption);
   font-weight: var(--weight-bold);
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .active .count {
@@ -49,7 +50,7 @@
 }
 
 .pulse {
-  animation: pulse 600ms var(--ease-out);
+  animation: pulse 400ms var(--ease-out);
 }
 
 @keyframes pulse {
@@ -57,7 +58,7 @@
     transform: scale(1);
   }
   40% {
-    transform: scale(1.35);
+    transform: scale(1.12);
   }
   100% {
     transform: scale(1);

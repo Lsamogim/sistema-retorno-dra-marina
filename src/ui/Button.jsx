@@ -11,10 +11,12 @@ export function Button({
   type = 'button',
   disabled,
   ref,
+  static: isStatic = false,
   ...rest
 }) {
   const classes = [
     styles.button,
+    isStatic ? styles.static : '',
     styles[variant],
     styles[size],
     fullWidth ? styles.fullWidth : '',

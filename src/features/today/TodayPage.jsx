@@ -123,7 +123,7 @@ export function TodayPage() {
           {stale.length > 0 && (
             <details className={styles.staleGroup}>
               <summary className={styles.staleSummary}>
-                Atrasados há mais de 60 dias ({stale.length}) — retomar contato quando houver tempo
+                Atrasados há mais de 60 dias ({stale.length}): retomar contato quando houver tempo
               </summary>
               <ul className={styles.list} aria-label="Atrasados há mais de 60 dias">
                 {stale.map(renderRow)}

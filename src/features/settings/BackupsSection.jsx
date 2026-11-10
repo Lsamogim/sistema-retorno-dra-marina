@@ -39,7 +39,7 @@ export function BackupsSection() {
               : 'Nenhum backup ainda. O primeiro é criado 1 minuto após o servidor iniciar.'}
           </Line>
           <Line tone={encryptionKeyConfigured ? 'done' : 'late'} title="Criptografia">
-            {encryptionKeyConfigured ? 'Ativada (AES-256).' : 'Desativada — defina BACKUP_ENCRYPTION_KEY no Railway.'}
+            {encryptionKeyConfigured ? 'Ativada (AES-256).' : 'Desativada. Defina BACKUP_ENCRYPTION_KEY no Railway.'}
           </Line>
           <Line tone={offsite.configured ? (offsite.lastUploadDate === today ? 'done' : 'soon') : 'late'} title="Cópia externa">
             {!offsite.configured

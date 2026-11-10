@@ -91,7 +91,7 @@ export function TaskRow({ item, moved, canUndo, handlers }) {
         </Button>
       );
       menuItems = [
-        ...(item.whatsappNumber ? [{ label: 'Mandar de novo', onSelect: () => handlers.whatsapp(item) }] : []),
+        ...(item.whatsappNumber ? [{ label: 'Enviar de novo', onSelect: () => handlers.whatsapp(item) }] : []),
         { label: 'Abrir ficha', onSelect: () => handlers.open(item) },
         { label: 'Não vai voltar', onSelect: () => handlers.archive(item), destructive: true },
       ];

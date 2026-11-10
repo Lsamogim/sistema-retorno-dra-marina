@@ -52,7 +52,7 @@ export function describeAudit(entry) {
     case 'user_updated':
       return `${d.username}: ${(d.changes || []).map((c) => CHANGE_LABELS[c] || c).join(', ')}`;
     case 'patient_updated':
-      return `paciente #${entry.targetId}${d.fields?.length ? ` — ${d.fields.join(', ')}` : ''}`;
+      return `paciente #${entry.targetId}${d.fields?.length ? `: ${d.fields.join(', ')}` : ''}`;
     case 'patients_merged':
       return `#${d.mergedFrom} → #${entry.targetId}`;
     case 'report_imported':

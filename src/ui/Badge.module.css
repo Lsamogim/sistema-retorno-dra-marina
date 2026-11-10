@@ -8,6 +8,7 @@
   line-height: var(--lh-caption);
   font-weight: var(--weight-semibold);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .late {

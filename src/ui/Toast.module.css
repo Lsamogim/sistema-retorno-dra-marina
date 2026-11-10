@@ -37,7 +37,7 @@
   min-height: var(--control-h-sm);
   padding: 0 var(--space-3);
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: var(--color-highlight);
   color: var(--color-ink);
   font-weight: var(--weight-bold);

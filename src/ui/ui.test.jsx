@@ -160,3 +160,22 @@ describe('pilha de sobreposições', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
+
+describe('ícones', () => {
+  test('Fechar da ficha e gatilho do menu usam SVG do lucide, não glifos de texto', () => {
+    render(
+      <>
+        <Sheet open title="Ficha" onClose={() => {}}>
+          <p>x</p>
+        </Sheet>
+        <Menu label="Mais ações" items={[{ label: 'A', onSelect: () => {} }]} />
+      </>
+    );
+    const close = screen.getByRole('button', { name: 'Fechar' });
+    const trigger = screen.getByRole('button', { name: 'Mais ações', hidden: true });
+    for (const el of [close, trigger]) {
+      expect(el.querySelector('svg')).not.toBeNull();
+      expect(el.textContent).toBe('');
+    }
+  });
+});

@@ -103,6 +103,7 @@
 }
 
 .meta {
+  font-variant-numeric: tabular-nums;
   color: var(--color-ink-3);
   font-size: var(--text-meta);
   line-height: var(--lh-meta);
